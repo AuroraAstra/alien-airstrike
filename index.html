@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>星际空袭</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="game" aria-label="星际空袭游戏">
+    <section class="stage">
+      <canvas id="game" width="1040" height="760" aria-label="游戏画布"></canvas>
+
+      <div class="hud" aria-live="polite">
+        <div class="stat">
+          <div class="label">分数</div>
+          <div class="value" id="score">0</div>
+        </div>
+        <div class="stat">
+          <div class="label">生命</div>
+          <div class="value danger" id="lives">3</div>
+        </div>
+        <div class="stat">
+          <div class="label">波次/怪物</div>
+          <div class="value" id="wave">1</div>
+        </div>
+        <div class="stat">
+          <div class="label" id="specialLabel">能量</div>
+          <div class="value good" id="charge">100%</div>
+        </div>
+        <div class="stat">
+          <div class="label">时间</div>
+          <div class="value" id="timer">不限</div>
+        </div>
+      </div>
+
+      <div class="touch-controls" aria-hidden="false">
+        <div class="pad">
+          <button class="up" data-hold="up" title="上">▲</button>
+          <button class="left" data-hold="left" title="左">◀</button>
+          <button class="down" data-hold="down" title="下">▼</button>
+          <button class="right" data-hold="right" title="右">▶</button>
+        </div>
+        <button class="fire" data-hold="fire" title="射击">开火</button>
+      </div>
+
+      <div class="overlay" id="overlay">
+        <div class="dialog">
+          <h1 id="title">星际空袭</h1>
+          <p id="message">方向键或 WASD 移动。升级模式不限时可无限成长，怪物每 30 秒变强。</p>
+          <div class="settings" id="settings">
+            <div class="setting">
+              <div class="setting-name">玩法</div>
+              <div class="choice-row two">
+                <button class="choice" data-option="mode" data-value="energy" aria-pressed="true">能量射击</button>
+                <button class="choice" data-option="mode" data-value="auto" aria-pressed="false">自动升级</button>
+              </div>
+            </div>
+            <div class="setting">
+              <div class="setting-name">时间</div>
+              <div class="choice-row two">
+                <button class="choice" data-option="timed" data-value="false" aria-pressed="true">不限时</button>
+                <button class="choice" data-option="timed" data-value="true" aria-pressed="false">限时 90 秒</button>
+              </div>
+            </div>
+            <div class="setting">
+              <div class="setting-name">难度</div>
+              <div class="choice-row">
+                <button class="choice" data-option="difficulty" data-value="easy" aria-pressed="false">简单</button>
+                <button class="choice" data-option="difficulty" data-value="normal" aria-pressed="true">普通</button>
+                <button class="choice" data-option="difficulty" data-value="hard" aria-pressed="false">困难</button>
+              </div>
+            </div>
+          </div>
+          <div class="actions">
+            <button id="start">开始游戏</button>
+            <button id="mute">音效：开</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
