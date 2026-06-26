@@ -17,6 +17,7 @@ const canvas = document.querySelector("#game");
     const settingsEl = document.querySelector("#settings");
     const startBtn = document.querySelector("#start");
     const muteBtn = document.querySelector("#mute");
+    const timeLimitInput = document.querySelector("#timeLimit");
 
     // Set 在这里用来保存“当前按住的按键”。
     // 数组分别保存游戏里的各种对象：玩家子弹、敌人、敌人子弹、粒子、星星、掉落道具。
@@ -48,6 +49,7 @@ const canvas = document.querySelector("#game");
     const settings = {
       mode: "energy",
       timed: false,
+      timeLimit: 90,
       difficulty: "normal"
     };
 
@@ -161,9 +163,17 @@ const canvas = document.querySelector("#game");
       return settings.mode === "energy" ? "能量射击" : "自动升级";
     }
 
+    function readTimeLimit() {
+      const value = Number(timeLimitInput.value);
+      const seconds = Number.isFinite(value) ? Math.round(value) : settings.timeLimit;
+      settings.timeLimit = clamp(seconds, 10, 3600);
+      timeLimitInput.value = String(settings.timeLimit);
+      return settings.timeLimit;
+    }
+
     // 把限时/不限时设置转成界面上显示的中文。
     function timeText() {
-      return settings.timed ? "限时 90 秒" : "不限时";
+      return settings.timed ? `限时 ${settings.timeLimit} 秒` : "不限时";
     }
 
     // 根据 settings 更新按钮的 aria-pressed 状态，让界面知道哪个选项被选中了。
@@ -178,11 +188,12 @@ const canvas = document.querySelector("#game");
     // 开始一局新游戏：清空旧数据，重置玩家、分数、倒计时，然后启动动画循环。
     function startGame() {
       const difficulty = difficulties[settings.difficulty];
+      readTimeLimit();
       score = 0;
       wave = 1;
       monsterLevel = 1;
       spawnTimer = 0;
-      timeRemaining = settings.timed ? 90 : 0;
+      timeRemaining = settings.timed ? settings.timeLimit : 0;
       elapsedTime = 0;
       bullets.length = 0;
       enemies.length = 0;
@@ -222,7 +233,7 @@ const canvas = document.querySelector("#game");
       if (!running) return;
       paused = !paused;
       titleEl.textContent = paused ? "已暂停" : "星际空袭";
-      messageEl.textContent = paused ? "按 P 继续战斗。" : "方向键或 WASD 移动。升级模式不限时可无限成长，怪物每 30 秒变强。";
+      messageEl.textContent = paused ? "按 P 继续战斗。" : "方向键或 WASD 移动。可选择不限时，或输入自定义限时时间。";
       settingsEl.hidden = paused;
       overlay.classList.toggle("hidden", !paused);
       if (!paused) {
@@ -900,11 +911,20 @@ const canvas = document.querySelector("#game");
       button.addEventListener("click", () => {
         const option = button.dataset.option;
         settings[option] = option === "timed" ? button.dataset.value === "true" : button.dataset.value;
+        if (option === "timed" && settings.timed) readTimeLimit();
         syncSettingButtons();
         titleEl.textContent = "星际空袭";
         messageEl.textContent = `已选择：${modeText()} / ${timeText()} / ${difficulties[settings.difficulty].label}难度。怪物每 30 秒升级。`;
       });
     }
+
+    timeLimitInput.addEventListener("change", () => {
+      readTimeLimit();
+      settings.timed = true;
+      syncSettingButtons();
+      titleEl.textContent = "星际空袭";
+      messageEl.textContent = `已选择：${modeText()} / ${timeText()} / ${difficulties[settings.difficulty].label}难度。怪物每 30 秒升级。`;
+    });
 
     // 开始按钮和音效按钮。
     startBtn.addEventListener("click", startGame);
