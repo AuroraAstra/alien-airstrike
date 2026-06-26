@@ -1,0 +1,935 @@
+// 这个文件是一个浏览器小游戏的主逻辑。
+// 它用 JavaScript 控制 <canvas> 画布：读取玩家输入、更新游戏状态、检测碰撞、再把画面画出来。
+
+// 先从 HTML 页面里找到需要操作的元素。
+// document.querySelector("#game") 的意思是：找到 id="game" 的元素。
+const canvas = document.querySelector("#game");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = document.querySelector("#score");
+    const livesEl = document.querySelector("#lives");
+    const waveEl = document.querySelector("#wave");
+    const chargeEl = document.querySelector("#charge");
+    const specialLabelEl = document.querySelector("#specialLabel");
+    const timerEl = document.querySelector("#timer");
+    const overlay = document.querySelector("#overlay");
+    const titleEl = document.querySelector("#title");
+    const messageEl = document.querySelector("#message");
+    const settingsEl = document.querySelector("#settings");
+    const startBtn = document.querySelector("#start");
+    const muteBtn = document.querySelector("#mute");
+
+    // Set 在这里用来保存“当前按住的按键”。
+    // 数组分别保存游戏里的各种对象：玩家子弹、敌人、敌人子弹、粒子、星星、掉落道具。
+    const keys = new Set();
+    const bullets = [];
+    const enemies = [];
+    const enemyShots = [];
+    const sparks = [];
+    const stars = [];
+    const pickups = [];
+
+    // 这些变量是整局游戏会变化的状态。
+    // running 表示游戏是否正在运行，paused 表示是否暂停。
+    // lastTime 用来计算每一帧之间隔了多久。
+    let audioContext = null;
+    let muted = false;
+    let running = false;
+    let paused = false;
+    let lastTime = 0;
+    let spawnTimer = 0;
+    let score = 0;
+    let wave = 1;
+    let shake = 0;
+    let timeRemaining = 0;
+    let elapsedTime = 0;
+    let monsterLevel = 1;
+
+    // 玩家在开始界面选择的设置。
+    const settings = {
+      mode: "energy",
+      timed: false,
+      difficulty: "normal"
+    };
+
+    // 三种难度的参数。
+    // 例如 hard 会让敌人更快、开火更频繁、玩家生命更少。
+    const difficulties = {
+      easy: {
+        label: "简单",
+        lives: 5,
+        spawnScale: 1.18,
+        enemySpeed: 0.82,
+        enemyFire: 0.74,
+        enemyHealth: -0.08,
+        scoreScale: 0.9
+      },
+      normal: {
+        label: "普通",
+        lives: 3,
+        spawnScale: 1,
+        enemySpeed: 1,
+        enemyFire: 1,
+        enemyHealth: 0,
+        scoreScale: 1
+      },
+      hard: {
+        label: "困难",
+        lives: 2,
+        spawnScale: 0.78,
+        enemySpeed: 1.2,
+        enemyFire: 1.35,
+        enemyHealth: 0.16,
+        scoreScale: 1.22
+      }
+    };
+
+    // 玩家飞机的数据。
+    // x/y 是当前位置，radius 是碰撞半径，cooldown 是开火冷却时间。
+    const player = {
+      x: 520,
+      y: 640,
+      radius: 22,
+      speed: 410,
+      lives: 3,
+      cooldown: 0,
+      charge: 1,
+      fireLevel: 1,
+      nextUpgrade: 180,
+      invulnerable: 0
+    };
+
+    // 根据浏览器窗口大小调整 canvas。
+    // 注意 canvas 的“显示大小”和“真实像素大小”不一定一样，所以这里会乘 devicePixelRatio 来避免模糊。
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      const scale = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.floor(rect.width * scale));
+      canvas.height = Math.max(1, Math.floor(rect.height * scale));
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
+      resetStars(rect.width, rect.height);
+      player.x = clamp(player.x, 34, rect.width - 34);
+      player.y = clamp(player.y, 88, rect.height - 34);
+    }
+
+    // 初始化背景星星。只在 stars 为空时创建，避免每次窗口变化都重复生成。
+    function resetStars(width, height) {
+      if (stars.length > 0) return;
+      for (let i = 0; i < 120; i += 1) {
+        stars.push({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          size: Math.random() * 1.8 + 0.4,
+          speed: Math.random() * 70 + 25,
+          alpha: Math.random() * 0.55 + 0.25
+        });
+      }
+    }
+
+    // 把 value 限制在 min 和 max 之间。
+    // 比如玩家不能飞出屏幕，就会用这个函数限制坐标。
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    // 生成 min 到 max 之间的随机小数。
+    function rand(min, max) {
+      return min + Math.random() * (max - min);
+    }
+
+    // 播放一个很短的音效。
+    // Web Audio API 的写法看起来复杂，但核心就是：创建振荡器 -> 调整音量 -> 接到扬声器 -> 开始/停止。
+    function playTone(freq, duration, type = "sine", gain = 0.05) {
+      if (muted) return;
+      try {
+        audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioContext.createOscillator();
+        const vol = audioContext.createGain();
+        osc.type = type;
+        osc.frequency.value = freq;
+        vol.gain.value = gain;
+        vol.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + duration);
+        osc.connect(vol).connect(audioContext.destination);
+        osc.start();
+        osc.stop(audioContext.currentTime + duration);
+      } catch {
+        muted = true;
+      }
+    }
+
+    // 把内部设置转成界面上显示的中文。
+    function modeText() {
+      return settings.mode === "energy" ? "能量射击" : "自动升级";
+    }
+
+    // 把限时/不限时设置转成界面上显示的中文。
+    function timeText() {
+      return settings.timed ? "限时 90 秒" : "不限时";
+    }
+
+    // 根据 settings 更新按钮的 aria-pressed 状态，让界面知道哪个选项被选中了。
+    function syncSettingButtons() {
+      for (const button of document.querySelectorAll("[data-option]")) {
+        const option = button.dataset.option;
+        const value = option === "timed" ? String(settings.timed) : settings[option];
+        button.setAttribute("aria-pressed", String(button.dataset.value === value));
+      }
+    }
+
+    // 开始一局新游戏：清空旧数据，重置玩家、分数、倒计时，然后启动动画循环。
+    function startGame() {
+      const difficulty = difficulties[settings.difficulty];
+      score = 0;
+      wave = 1;
+      monsterLevel = 1;
+      spawnTimer = 0;
+      timeRemaining = settings.timed ? 90 : 0;
+      elapsedTime = 0;
+      bullets.length = 0;
+      enemies.length = 0;
+      enemyShots.length = 0;
+      sparks.length = 0;
+      pickups.length = 0;
+      player.x = canvas.clientWidth / 2;
+      player.y = canvas.clientHeight - 92;
+      player.lives = difficulty.lives;
+      player.cooldown = 0;
+      player.charge = 1;
+      player.fireLevel = 1;
+      player.nextUpgrade = settings.difficulty === "hard" ? 220 : settings.difficulty === "easy" ? 150 : 180;
+      player.invulnerable = 1.6;
+      running = true;
+      paused = false;
+      settingsEl.hidden = true;
+      overlay.classList.add("hidden");
+      lastTime = performance.now();
+      updateHud();
+      requestAnimationFrame(loop);
+    }
+
+    // 游戏结束时显示结算界面。
+    // reason 为 "time" 表示倒计时结束，否则一般是玩家生命耗尽。
+    function endGame(reason = "lost") {
+      running = false;
+      titleEl.textContent = reason === "time" ? "时间到" : "任务结束";
+      messageEl.textContent = `最终分数：${score}。生存 ${formatClock(elapsedTime)}，怪物 Lv.${monsterLevel}。${modeText()} / ${timeText()} / ${difficulties[settings.difficulty].label}难度。`;
+      startBtn.textContent = "重新开始";
+      settingsEl.hidden = false;
+      overlay.classList.remove("hidden");
+    }
+
+    // 暂停/继续游戏。
+    function togglePause() {
+      if (!running) return;
+      paused = !paused;
+      titleEl.textContent = paused ? "已暂停" : "星际空袭";
+      messageEl.textContent = paused ? "按 P 继续战斗。" : "方向键或 WASD 移动。升级模式不限时可无限成长，怪物每 30 秒变强。";
+      settingsEl.hidden = paused;
+      overlay.classList.toggle("hidden", !paused);
+      if (!paused) {
+        lastTime = performance.now();
+        requestAnimationFrame(loop);
+      }
+    }
+
+    // 更新顶部 HUD，也就是分数、生命、波次、能量/火力、时间这些文字。
+    function updateHud() {
+      scoreEl.textContent = String(score);
+      livesEl.textContent = String(player.lives);
+      waveEl.textContent = `${wave}/${monsterLevel}`;
+      specialLabelEl.textContent = settings.mode === "energy" ? "能量" : "火力";
+      chargeEl.textContent = settings.mode === "energy" ? `${Math.round(player.charge * 100)}%` : `Lv.${player.fireLevel}`;
+      timerEl.textContent = settings.timed ? `${Math.max(0, Math.ceil(timeRemaining))}s` : formatClock(elapsedTime);
+    }
+
+    // 把秒数格式化成 分:秒，比如 75 秒变成 1:15。
+    function formatClock(seconds) {
+      const total = Math.max(0, Math.floor(seconds));
+      const minutes = Math.floor(total / 60);
+      const rest = String(total % 60).padStart(2, "0");
+      return `${minutes}:${rest}`;
+    }
+
+    // 自动升级模式下的最高火力等级。
+    // 限时模式最多 5 级，不限时模式可以无限成长。
+    function autoMaxLevel() {
+      return settings.timed ? 5 : Infinity;
+    }
+
+    // 自动升级模式下，每升一级需要增加多少分数门槛。
+    function autoUpgradeStep() {
+      const base = settings.difficulty === "hard" ? 280 : settings.difficulty === "easy" ? 190 : 230;
+      return Math.round(base + player.fireLevel * 38);
+    }
+
+    // 怪物每 30 秒提升一级。
+    // monsterLevel 越高，后面生成的敌人越强。
+    function updateMonsterLevel() {
+      const nextLevel = 1 + Math.floor(elapsedTime / 30);
+      if (nextLevel <= monsterLevel) return;
+      monsterLevel = nextLevel;
+      makeSparks(canvas.clientWidth / 2, 92, "#ffcf5b", 28);
+      playTone(140, 0.18, "sawtooth", 0.05);
+    }
+
+    // 敌人距离玩家多远以内才会开火。
+    // 怪物等级越高，攻击范围越大，但不会超过屏幕尺寸的一定比例。
+    function enemyAttackRange() {
+      const screenLimit = Math.max(canvas.clientWidth, canvas.clientHeight) * 1.35;
+      return Math.min(screenLimit, 280 + monsterLevel * 85);
+    }
+
+    // 敌人一次发射几颗子弹。
+    // 等级越高弹幕越密，最多 9 颗。
+    function enemyShotCount() {
+      return Math.min(9, 1 + Math.floor((monsterLevel - 1) / 2));
+    }
+
+    // 让某个敌人朝玩家方向发射一组子弹。
+    function fireEnemyVolley(enemy, difficulty) {
+      const count = enemyShotCount();
+      // atan2 可以算出“敌人指向玩家”的角度。
+      const baseAngle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+      const spread = Math.min(0.82, 0.14 * (count - 1));
+      const speed = (150 + wave * 12 + monsterLevel * 10) * difficulty.enemySpeed;
+      for (let i = 0; i < count; i += 1) {
+        // middle/offset 让多颗子弹围绕中间方向散开。
+        const middle = (count - 1) / 2;
+        const angle = baseAngle + (i - middle) * (count === 1 ? 0 : spread / Math.max(1, count - 1));
+        enemyShots.push({
+          x: enemy.x,
+          y: enemy.y + enemy.radius * 0.7,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          radius: 5 + Math.min(3, Math.floor((monsterLevel - 1) / 4))
+        });
+      }
+      // 防止敌方子弹无限增加，数量太多会卡。
+      if (enemyShots.length > 260) enemyShots.splice(0, enemyShots.length - 260);
+    }
+
+    // 玩家开火。
+    // auto=true 表示自动升级模式里自动射击；false 表示玩家按键射击。
+    function shoot(auto = false) {
+      if (player.cooldown > 0) return;
+      if (settings.mode === "energy" && player.charge < 0.11) return;
+      // 能量模式：基础是一颗直线子弹；能量较高时额外发两颗斜向子弹。
+      if (settings.mode === "energy") bullets.push({ x: player.x, y: player.y - 28, vx: 0, vy: -720, radius: 4, power: 1 });
+      if (settings.mode === "energy" && player.charge > 0.62) {
+        bullets.push({ x: player.x - 16, y: player.y - 22, vx: -48, vy: -680, radius: 3, power: 1 });
+        bullets.push({ x: player.x + 16, y: player.y - 22, vx: 48, vy: -680, radius: 3, power: 1 });
+      }
+      if (settings.mode === "auto") {
+        // 自动升级模式：火力等级越高，弹丸越多、散射越宽、威力越强。
+        const level = player.fireLevel;
+        const pelletCount = Math.min(18, 1 + Math.floor((level - 1) * 1.35));
+        const spread = Math.min(0.9, 0.12 + level * 0.035);
+        const power = 1 + Math.floor((level - 1) / 8);
+        for (let i = 0; i < pelletCount; i += 1) {
+          const middle = (pelletCount - 1) / 2;
+          const offset = i - middle;
+          const ratio = middle === 0 ? 0 : offset / middle;
+          const angle = -Math.PI / 2 + ratio * spread;
+          const speed = 690 + Math.min(level * 9, 210);
+          bullets.push({
+            x: player.x + offset * 5,
+            y: player.y - 24 + Math.abs(offset) * 1.4,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            radius: level >= 8 && i === Math.round(middle) ? 5 : 3,
+            power: i === Math.round(middle) ? power : Math.max(1, power - 1)
+          });
+        }
+        player.cooldown = Math.max(settings.timed ? 0.08 : 0.045, 0.2 - level * 0.012);
+      } else {
+        // 能量模式每次射击会消耗一点 charge。
+        player.cooldown = auto ? 0.16 : 0.13;
+        player.charge = Math.max(0, player.charge - 0.08);
+      }
+      // 同样限制玩家子弹数量，避免对象太多影响性能。
+      if (bullets.length > 420) bullets.splice(0, bullets.length - 420);
+      playTone(settings.mode === "auto" ? 720 : 640, 0.06, "square", 0.035);
+    }
+
+    // 生成一个新的敌人，从屏幕上方进入。
+    function spawnEnemy() {
+      const width = canvas.clientWidth;
+      const difficulty = difficulties[settings.difficulty];
+      // threatScale 随怪物等级上升，用来增强血量、分数等。
+      const threatScale = 1 + (monsterLevel - 1) * 0.08;
+      const toughChance = Math.min(0.16 + wave * 0.018 + monsterLevel * 0.012 + difficulty.enemyHealth, 0.72);
+      const hp = Math.random() < toughChance ? 2 : 1;
+      const bonusHp = Math.floor((monsterLevel - 1) / 5);
+      const hardBonus = settings.difficulty === "hard" && hp === 2 && wave > 3 ? 1 : 0;
+      const finalHp = hp + bonusHp + hardBonus;
+      const radius = hp === 2 ? 24 : 18;
+      enemies.push({
+        x: rand(34, width - 34),
+        y: -32,
+        baseX: rand(34, width - 34),
+        radius,
+        hp: finalHp,
+        maxHp: finalHp,
+        speed: (rand(56, 96) + wave * 9 + monsterLevel * 5) * difficulty.enemySpeed,
+        wobble: rand(0.7, 1.8),
+        phase: rand(0, Math.PI * 2),
+        shotTimer: rand(1.2, 3.4) / Math.sqrt(wave * difficulty.enemyFire * threatScale),
+        points: Math.round((hp === 2 ? 35 : 15) * difficulty.scoreScale * threatScale)
+      });
+    }
+
+    // 制造爆炸/受击的粒子效果。
+    function makeSparks(x, y, color, count = 16) {
+      for (let i = 0; i < count; i += 1) {
+        const angle = rand(0, Math.PI * 2);
+        const speed = rand(70, 280);
+        sparks.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: rand(0.28, 0.72),
+          maxLife: 0.72,
+          size: rand(1.5, 4.2),
+          color
+        });
+      }
+    }
+
+    // 敌人被击毁时，有概率掉落道具。
+    // life 加生命，upgrade 升级火力，charge 回满能量。
+    function addPickup(x, y) {
+      const chance = settings.mode === "auto" ? 0.18 : 0.13;
+      if (Math.random() > chance) return;
+      const type = settings.mode === "auto"
+        ? (Math.random() < 0.72 ? "upgrade" : "life")
+        : (Math.random() < 0.68 ? "charge" : "life");
+      pickups.push({ x, y, radius: 12, speed: 120, type });
+    }
+
+    // 每一帧更新游戏状态。
+    // dt 是距离上一帧过去的秒数，time 是浏览器传进来的当前时间。
+    function update(dt, time) {
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      const difficulty = difficulties[settings.difficulty];
+      // dx/dy 表示玩家当前移动方向。
+      // 右/下是 +1，左/上是 -1，没有按就是 0。
+      const dx = (keys.has("ArrowRight") || keys.has("d") || keys.has("right") ? 1 : 0)
+        - (keys.has("ArrowLeft") || keys.has("a") || keys.has("left") ? 1 : 0);
+      const dy = (keys.has("ArrowDown") || keys.has("s") || keys.has("down") ? 1 : 0)
+        - (keys.has("ArrowUp") || keys.has("w") || keys.has("up") ? 1 : 0);
+      const length = Math.hypot(dx, dy) || 1;
+
+      // 除以 length 是为了让斜着飞时速度不要变快。
+      player.x = clamp(player.x + (dx / length) * player.speed * dt, 26, width - 26);
+      player.y = clamp(player.y + (dy / length) * player.speed * dt, 92, height - 26);
+      player.cooldown = Math.max(0, player.cooldown - dt);
+      player.charge = Math.min(1, player.charge + dt * 0.16);
+      player.invulnerable = Math.max(0, player.invulnerable - dt);
+      elapsedTime += dt;
+      updateMonsterLevel();
+      // 限时模式：倒计时归零就结束。
+      if (settings.timed) {
+        timeRemaining -= dt;
+        if (timeRemaining <= 0) {
+          timeRemaining = 0;
+          updateHud();
+          endGame("time");
+          return;
+        }
+      }
+      // 自动模式自动开火；能量模式按空格或屏幕按钮开火。
+      if (settings.mode === "auto") {
+        shoot(true);
+      } else if (keys.has(" ") || keys.has("fire")) {
+        shoot();
+      }
+
+      // 根据当前难度、波次、怪物等级决定刷怪间隔。
+      spawnTimer -= dt;
+      const spawnGap = clamp((0.86 - wave * 0.045 - monsterLevel * 0.018) * difficulty.spawnScale, 0.18, 1.12);
+      if (spawnTimer <= 0) {
+        spawnEnemy();
+        spawnTimer = spawnGap;
+      }
+
+      wave = 1 + Math.floor(score / 420);
+      if (settings.mode === "auto") upgradeFire(false);
+
+      // 背景星星向下移动，超过底部就从顶部重新出现。
+      for (const star of stars) {
+        star.y += star.speed * dt * (1 + wave * 0.03);
+        if (star.y > height + 4) {
+          star.y = -4;
+          star.x = Math.random() * width;
+        }
+      }
+
+      // 更新玩家子弹位置；飞出屏幕后删除。
+      for (let i = bullets.length - 1; i >= 0; i -= 1) {
+        const bullet = bullets[i];
+        bullet.x += bullet.vx * dt;
+        bullet.y += bullet.vy * dt;
+        if (bullet.y < -30 || bullet.x < -30 || bullet.x > width + 30) bullets.splice(i, 1);
+      }
+
+      // 更新敌方子弹，并检测是否打到玩家。
+      for (let i = enemyShots.length - 1; i >= 0; i -= 1) {
+        const shot = enemyShots[i];
+        shot.x += shot.vx * dt;
+        shot.y += shot.vy * dt;
+        if (shot.y > height + 34 || shot.x < -34 || shot.x > width + 34) {
+          enemyShots.splice(i, 1);
+          continue;
+        }
+        if (player.invulnerable <= 0 && circlesTouch(player, shot)) {
+          enemyShots.splice(i, 1);
+          hurtPlayer();
+        }
+      }
+
+      // 更新敌人：移动、开火、出界删除、撞到玩家、被玩家子弹击中。
+      for (let i = enemies.length - 1; i >= 0; i -= 1) {
+        const enemy = enemies[i];
+        enemy.phase += enemy.wobble * dt;
+        enemy.y += enemy.speed * dt;
+        enemy.x += Math.sin(enemy.phase) * (64 + wave * 3) * dt;
+        enemy.x = clamp(enemy.x, enemy.radius, width - enemy.radius);
+        enemy.shotTimer -= dt;
+
+        // 只有敌人在攻击范围内，才会朝玩家开火。
+        const distanceToPlayer = Math.hypot(player.x - enemy.x, player.y - enemy.y);
+        if (enemy.shotTimer <= 0 && enemy.y > 20 && distanceToPlayer <= enemyAttackRange()) {
+          fireEnemyVolley(enemy, difficulty);
+          enemy.shotTimer = rand(1.4, 3.2) / Math.sqrt(wave * difficulty.enemyFire * (1 + monsterLevel * 0.12));
+          playTone(180, 0.08, "sawtooth", 0.018);
+        }
+
+        if (enemy.y > height + enemy.radius) {
+          enemies.splice(i, 1);
+          continue;
+        }
+
+        // 玩家和敌人相撞，玩家受伤，敌人消失。
+        if (player.invulnerable <= 0 && circlesTouch(player, enemy)) {
+          enemies.splice(i, 1);
+          makeSparks(enemy.x, enemy.y, "#ff75a0", 24);
+          hurtPlayer();
+          continue;
+        }
+
+        // 倒着遍历数组并 splice 删除，是为了删除元素时不跳过后面的对象。
+        for (let j = bullets.length - 1; j >= 0; j -= 1) {
+          const bullet = bullets[j];
+          if (!circlesTouch(enemy, bullet)) continue;
+          bullets.splice(j, 1);
+          enemy.hp -= bullet.power;
+          makeSparks(bullet.x, bullet.y, "#6ff0ff", 6);
+          if (enemy.hp <= 0) {
+            // 敌人血量归零：加分、可能掉落道具、播放爆炸效果。
+            enemies.splice(i, 1);
+            score += enemy.points;
+            addPickup(enemy.x, enemy.y);
+            makeSparks(enemy.x, enemy.y, enemy.maxHp > 1 ? "#ffcf5b" : "#64f2a4", enemy.maxHp > 1 ? 30 : 18);
+            playTone(enemy.maxHp > 1 ? 120 : 260, 0.12, "triangle", 0.055);
+          } else {
+            playTone(340, 0.05, "triangle", 0.03);
+          }
+          break;
+        }
+      }
+
+      // 更新掉落道具的位置，并检测玩家是否捡到。
+      for (let i = pickups.length - 1; i >= 0; i -= 1) {
+        const pickup = pickups[i];
+        pickup.y += pickup.speed * dt;
+        pickup.x += Math.sin(time / 260 + pickup.y * 0.02) * 26 * dt;
+        if (pickup.y > height + 30) {
+          pickups.splice(i, 1);
+          continue;
+        }
+        if (circlesTouch(player, pickup)) {
+          pickups.splice(i, 1);
+          if (pickup.type === "life") {
+            player.lives = Math.min(5, player.lives + 1);
+          } else if (pickup.type === "upgrade") {
+            upgradeFire(true);
+          } else {
+            player.charge = 1;
+          }
+          playTone(880, 0.11, "sine", 0.055);
+        }
+      }
+
+      // 更新粒子效果，生命值归零后删除。
+      for (let i = sparks.length - 1; i >= 0; i -= 1) {
+        const spark = sparks[i];
+        spark.life -= dt;
+        spark.x += spark.vx * dt;
+        spark.y += spark.vy * dt;
+        spark.vx *= 0.985;
+        spark.vy *= 0.985;
+        if (spark.life <= 0) sparks.splice(i, 1);
+      }
+
+      // shake 是屏幕震动强度，会随时间慢慢减小。
+      shake = Math.max(0, shake - dt * 18);
+      updateHud();
+    }
+
+    function upgradeFire(force) {
+      const maxLevel = autoMaxLevel();
+      if (settings.mode !== "auto" || player.fireLevel >= maxLevel) return;
+      let upgraded = false;
+      if (force) {
+        // force=true 表示捡到了升级道具，直接升一级。
+        player.fireLevel = Math.min(maxLevel, player.fireLevel + 1);
+        upgraded = true;
+      } else {
+        // force=false 表示根据分数自动升级。while 可以一次补上多级。
+        while (score >= player.nextUpgrade && player.fireLevel < maxLevel) {
+          player.fireLevel += 1;
+          player.nextUpgrade += autoUpgradeStep();
+          upgraded = true;
+        }
+      }
+      if (upgraded) {
+        makeSparks(player.x, player.y - 10, "#6ff0ff", 22);
+        playTone(980, 0.12, "triangle", 0.06);
+      }
+    }
+
+    // 玩家受伤：扣生命、短暂无敌、屏幕震动、播放音效。
+    function hurtPlayer() {
+      player.lives -= 1;
+      player.invulnerable = 1.35;
+      shake = 12;
+      makeSparks(player.x, player.y, "#ff5d7d", 28);
+      playTone(90, 0.2, "sawtooth", 0.075);
+      if (player.lives <= 0) endGame();
+    }
+
+    // 圆形碰撞检测。
+    // 两个圆心的距离小于两个半径之和，就说明碰到了。
+    function circlesTouch(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y) < a.radius + b.radius;
+    }
+
+    // 绘制整帧画面。
+    // 游戏里常见的流程是：先 update 更新数据，再 draw 按最新数据画出来。
+    function draw() {
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      ctx.save();
+      ctx.clearRect(0, 0, width, height);
+
+      // 受伤时给整个画布加一点随机偏移，制造震屏效果。
+      const shakeX = shake ? rand(-shake, shake) : 0;
+      const shakeY = shake ? rand(-shake, shake) : 0;
+      ctx.translate(shakeX, shakeY);
+
+      // 画背景渐变。
+      const bg = ctx.createLinearGradient(0, 0, 0, height);
+      bg.addColorStop(0, "#071425");
+      bg.addColorStop(0.55, "#0a1222");
+      bg.addColorStop(1, "#170d22");
+      ctx.fillStyle = bg;
+      ctx.fillRect(-20, -20, width + 40, height + 40);
+
+      drawStars(width, height);
+      drawNebula(width, height);
+      for (const pickup of pickups) drawPickup(pickup);
+      for (const bullet of bullets) drawBullet(bullet);
+      for (const shot of enemyShots) drawEnemyShot(shot);
+      for (const enemy of enemies) drawEnemy(enemy);
+      drawPlayer();
+      for (const spark of sparks) drawSpark(spark);
+
+      ctx.restore();
+    }
+
+    // 画星星和淡淡的网格线。
+    function drawStars(width, height) {
+      ctx.save();
+      for (const star of stars) {
+        ctx.globalAlpha = star.alpha;
+        ctx.fillStyle = "#d8f4ff";
+        ctx.fillRect(star.x, star.y, star.size, star.size * 2.6);
+      }
+      ctx.globalAlpha = 1;
+      const grid = ctx.createLinearGradient(0, 0, width, height);
+      grid.addColorStop(0, "rgba(65, 215, 255, 0.05)");
+      grid.addColorStop(1, "rgba(255, 93, 125, 0.05)");
+      ctx.strokeStyle = grid;
+      ctx.lineWidth = 1;
+      for (let y = (performance.now() * 0.02) % 44; y < height; y += 44) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // 画背景里的发光星云。
+    function drawNebula(width, height) {
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      const glowA = ctx.createRadialGradient(width * 0.22, height * 0.22, 0, width * 0.22, height * 0.22, width * 0.42);
+      glowA.addColorStop(0, "rgba(65, 215, 255, 0.13)");
+      glowA.addColorStop(1, "rgba(65, 215, 255, 0)");
+      ctx.fillStyle = glowA;
+      ctx.fillRect(0, 0, width, height);
+      const glowB = ctx.createRadialGradient(width * 0.78, height * 0.72, 0, width * 0.78, height * 0.72, width * 0.36);
+      glowB.addColorStop(0, "rgba(255, 93, 125, 0.11)");
+      glowB.addColorStop(1, "rgba(255, 93, 125, 0)");
+      ctx.fillStyle = glowB;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    // 画玩家飞机。
+    // 这里大量使用 canvas path：moveTo/lineTo/arc/ellipse 这些都是“画路径”的命令。
+    function drawPlayer() {
+      ctx.save();
+      ctx.translate(player.x, player.y);
+      // 受伤后的无敌时间里，让飞机闪烁。
+      if (player.invulnerable > 0 && Math.floor(player.invulnerable * 12) % 2 === 0) ctx.globalAlpha = 0.45;
+
+      // 画尾焰。
+      const flame = 18 + Math.sin(performance.now() / 42) * 6;
+      const flameGradient = ctx.createLinearGradient(0, 12, 0, 42);
+      flameGradient.addColorStop(0, "rgba(111, 240, 255, 0.95)");
+      flameGradient.addColorStop(0.55, "rgba(255, 207, 91, 0.85)");
+      flameGradient.addColorStop(1, "rgba(255, 93, 125, 0)");
+      ctx.fillStyle = flameGradient;
+      ctx.beginPath();
+      ctx.moveTo(-8, 14);
+      ctx.lineTo(0, flame + 28);
+      ctx.lineTo(8, 14);
+      ctx.closePath();
+      ctx.fill();
+
+      // 画机身。
+      const body = ctx.createLinearGradient(0, -35, 0, 26);
+      body.addColorStop(0, "#f7fbff");
+      body.addColorStop(0.48, "#8edcff");
+      body.addColorStop(1, "#245f9b");
+      ctx.fillStyle = body;
+      ctx.beginPath();
+      ctx.moveTo(0, -34);
+      ctx.lineTo(18, 22);
+      ctx.quadraticCurveTo(0, 14, -18, 22);
+      ctx.closePath();
+      ctx.fill();
+
+      // 画左右机翼。
+      ctx.fillStyle = "#41d7ff";
+      ctx.beginPath();
+      ctx.moveTo(-16, 3);
+      ctx.lineTo(-42, 20);
+      ctx.lineTo(-14, 24);
+      ctx.closePath();
+      ctx.moveTo(16, 3);
+      ctx.lineTo(42, 20);
+      ctx.lineTo(14, 24);
+      ctx.closePath();
+      ctx.fill();
+
+      // 画驾驶舱。
+      ctx.fillStyle = "#06111f";
+      ctx.beginPath();
+      ctx.ellipse(0, -13, 8, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 画外圈护盾光环。
+      ctx.strokeStyle = "rgba(111, 240, 255, 0.42)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 30 + Math.sin(performance.now() / 90) * 2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 画敌人。
+    function drawEnemy(enemy) {
+      ctx.save();
+      ctx.translate(enemy.x, enemy.y);
+      const body = ctx.createLinearGradient(0, -enemy.radius, 0, enemy.radius);
+      body.addColorStop(0, enemy.maxHp > 1 ? "#ffe985" : "#9fffcc");
+      body.addColorStop(0.55, enemy.maxHp > 1 ? "#ff7d6b" : "#28c782");
+      body.addColorStop(1, "#143428");
+      ctx.fillStyle = body;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, enemy.radius * 1.28, enemy.radius * 0.72, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(238, 245, 255, 0.82)";
+      ctx.beginPath();
+      ctx.arc(-enemy.radius * 0.38, -enemy.radius * 0.06, enemy.radius * 0.18, 0, Math.PI * 2);
+      ctx.arc(enemy.radius * 0.38, -enemy.radius * 0.06, enemy.radius * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#06111f";
+      ctx.beginPath();
+      ctx.arc(-enemy.radius * 0.35, -enemy.radius * 0.06, enemy.radius * 0.08, 0, Math.PI * 2);
+      ctx.arc(enemy.radius * 0.35, -enemy.radius * 0.06, enemy.radius * 0.08, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = enemy.hp < enemy.maxHp ? "rgba(255, 255, 255, 0.9)" : "rgba(255, 255, 255, 0.28)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-enemy.radius, enemy.radius * 0.42);
+      ctx.quadraticCurveTo(0, enemy.radius * 0.86, enemy.radius, enemy.radius * 0.42);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 画玩家子弹。
+    function drawBullet(bullet) {
+      ctx.save();
+      ctx.shadowColor = "#6ff0ff";
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = "#d7fbff";
+      ctx.beginPath();
+      ctx.roundRect(bullet.x - 3, bullet.y - 14, 6, 20, 4);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 画敌方子弹。
+    function drawEnemyShot(shot) {
+      ctx.save();
+      ctx.shadowColor = "#ff5d7d";
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = "#ff7a98";
+      ctx.beginPath();
+      ctx.arc(shot.x, shot.y, shot.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 画掉落道具。不同类型用不同颜色和文字区分。
+    function drawPickup(pickup) {
+      ctx.save();
+      ctx.translate(pickup.x, pickup.y);
+      ctx.rotate(performance.now() / 420);
+      ctx.shadowColor = pickup.type === "life" ? "#ff5d7d" : pickup.type === "upgrade" ? "#64f2a4" : "#41d7ff";
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = pickup.type === "life" ? "#ff7a98" : pickup.type === "upgrade" ? "#64f2a4" : "#6ff0ff";
+      ctx.beginPath();
+      for (let i = 0; i < 8; i += 1) {
+        const angle = (Math.PI * 2 * i) / 8;
+        const radius = i % 2 ? 6 : 13;
+        ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#06111f";
+      ctx.font = pickup.type === "upgrade" ? "bold 10px system-ui" : "bold 14px system-ui";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(pickup.type === "life" ? "+" : pickup.type === "upgrade" ? "UP" : "⚡", 0, 0);
+      ctx.restore();
+    }
+
+    // 画粒子效果。
+    function drawSpark(spark) {
+      ctx.save();
+      ctx.globalAlpha = clamp(spark.life / spark.maxLife, 0, 1);
+      ctx.fillStyle = spark.color;
+      ctx.beginPath();
+      ctx.arc(spark.x, spark.y, spark.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 游戏主循环。
+    // requestAnimationFrame 会让浏览器在下一次刷新屏幕前调用 loop。
+    function loop(time) {
+      if (!running || paused) return;
+      // dt 单位是秒；最多按 0.033 秒处理，避免切回页面时一次跳太大。
+      const dt = Math.min((time - lastTime) / 1000, 0.033);
+      lastTime = time;
+      update(dt, time);
+      draw();
+      if (running) requestAnimationFrame(loop);
+    }
+
+    // 窗口尺寸变化时，重新调整画布大小。
+    window.addEventListener("resize", resizeCanvas);
+
+    // 键盘按下：记录到 keys 里。
+    // preventDefault 是为了防止方向键/空格触发页面滚动。
+    window.addEventListener("keydown", (event) => {
+      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "w", "a", "s", "d"].includes(key)) {
+        event.preventDefault();
+        keys.add(key);
+      }
+      if (key === "p") togglePause();
+    });
+
+    // 键盘松开：从 keys 里删除。
+    window.addEventListener("keyup", (event) => {
+      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+      keys.delete(key);
+    });
+
+    // 手机/触屏上的虚拟方向按钮。
+    // data-hold 里写的是这个按钮代表的动作，比如 left/right/fire。
+    for (const button of document.querySelectorAll("[data-hold]")) {
+      const value = button.dataset.hold;
+      const press = (event) => {
+        event.preventDefault();
+        keys.add(value);
+      };
+      const release = (event) => {
+        event.preventDefault();
+        keys.delete(value);
+      };
+      button.addEventListener("pointerdown", press);
+      button.addEventListener("pointerup", release);
+      button.addEventListener("pointercancel", release);
+      button.addEventListener("pointerleave", release);
+    }
+
+    // 开始界面的设置按钮。
+    // data-option 表示修改哪个设置，data-value 表示要改成什么值。
+    for (const button of document.querySelectorAll("[data-option]")) {
+      button.addEventListener("click", () => {
+        const option = button.dataset.option;
+        settings[option] = option === "timed" ? button.dataset.value === "true" : button.dataset.value;
+        syncSettingButtons();
+        titleEl.textContent = "星际空袭";
+        messageEl.textContent = `已选择：${modeText()} / ${timeText()} / ${difficulties[settings.difficulty].label}难度。怪物每 30 秒升级。`;
+      });
+    }
+
+    // 开始按钮和音效按钮。
+    startBtn.addEventListener("click", startGame);
+    muteBtn.addEventListener("click", () => {
+      muted = !muted;
+      muteBtn.textContent = muted ? "音效：关" : "音效：开";
+    });
+
+    // 兼容旧浏览器：如果 canvas 没有 roundRect，就自己补一个简化版本。
+    if (!CanvasRenderingContext2D.prototype.roundRect) {
+      CanvasRenderingContext2D.prototype.roundRect = function roundRect(x, y, width, height, radius) {
+        const r = Math.min(radius, Math.abs(width) / 2, Math.abs(height) / 2);
+        this.beginPath();
+        this.moveTo(x + r, y);
+        this.arcTo(x + width, y, x + width, y + height, r);
+        this.arcTo(x + width, y + height, x, y + height, r);
+        this.arcTo(x, y + height, x, y, r);
+        this.arcTo(x, y, x + width, y, r);
+        this.closePath();
+        return this;
+      };
+    }
+
+    // 页面刚加载时：同步按钮状态、调整画布、先画一帧静态画面。
+    syncSettingButtons();
+    resizeCanvas();
+    draw();
+  
