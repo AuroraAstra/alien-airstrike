@@ -128,6 +128,9 @@
       display: grid;
       place-items: center;
       padding: 22px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
       background: linear-gradient(180deg, rgba(3, 8, 17, 0.52), rgba(3, 8, 17, 0.76));
       transition: opacity 180ms ease, visibility 180ms ease;
     }
@@ -140,6 +143,8 @@
 
     .dialog {
       width: min(620px, 100%);
+      max-height: calc(100dvh - 44px);
+      overflow-y: auto;
       border: 1px solid rgba(154, 185, 255, 0.34);
       border-radius: 8px;
       background: rgba(9, 18, 34, 0.92);
@@ -289,6 +294,34 @@
 
       .hud {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .overlay {
+        place-items: start center;
+        padding:
+          max(10px, env(safe-area-inset-top))
+          10px
+          max(96px, env(safe-area-inset-bottom));
+      }
+
+      .dialog {
+        max-height: none;
+        padding: 14px;
+      }
+
+      .dialog h1 {
+        font-size: clamp(34px, 12vw, 52px);
+        margin-bottom: 8px;
+      }
+
+      .dialog p {
+        margin-bottom: 12px;
+        line-height: 1.5;
+      }
+
+      .settings {
+        gap: 10px;
+        margin-bottom: 14px;
       }
 
       .stat {
