@@ -53,7 +53,7 @@ const canvas = document.querySelector("#game");
     const timedWaveDuration = 18;
     const normalBossEveryWaves = 3;
     const timedBossEveryWaves = 2;
-    const maxPlayerLives = 6;
+    const maxPlayerLives = 5;
     const maxBombs = 3;
     const stats = {
       maxWave: 1,
@@ -828,7 +828,7 @@ const canvas = document.querySelector("#game");
       }
       player.cooldown = Math.max(0, player.cooldown - dt);
       player.charge = Math.min(1, player.charge + dt * 0.16);
-      player.shield = Math.min(1, player.shield + dt * 0.045);
+      player.shield = Math.min(1, player.shield + dt * 0.026);
       player.invulnerable = Math.max(0, player.invulnerable - dt);
       grazeCooldown = Math.max(0, grazeCooldown - dt);
       elapsedTime += dt;
@@ -1026,7 +1026,9 @@ const canvas = document.querySelector("#game");
         if (circlesTouch(player, pickup)) {
           pickups.splice(i, 1);
           if (pickup.type === "life") {
-            player.maxLives = Math.min(maxPlayerLives, Math.max(player.maxLives, player.lives + 1));
+            if (player.lives >= player.maxLives && player.maxLives < maxPlayerLives) {
+              player.maxLives += 1;
+            }
             player.lives = Math.min(player.maxLives, player.lives + 1);
           } else if (pickup.type === "upgrade") {
             upgradeFire(true);
@@ -1037,7 +1039,7 @@ const canvas = document.querySelector("#game");
             else player.charge = 1;
           } else {
             player.charge = 1;
-            player.shield = 1;
+            player.shield = Math.min(1, player.shield + 0.42);
           }
           playTone(880, 0.11, "sine", 0.055);
         }
@@ -1098,7 +1100,7 @@ const canvas = document.querySelector("#game");
         player.lives -= 1;
         player.shield = 0;
       }
-      player.invulnerable = 1.35;
+      player.invulnerable = 1.08;
       shake = 12;
       makeSparks(player.x, player.y, "#ff5d7d", 28);
       playTone(90, 0.2, "sawtooth", 0.075);
