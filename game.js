@@ -589,6 +589,7 @@ const canvas = document.querySelector("#game");
       }
       // 同样限制玩家子弹数量，避免对象太多影响性能。
       if (bullets.length > 180) bullets.splice(0, bullets.length - 180);
+      makeSparks(player.x, player.y - 28, settings.mode === "auto" ? "#64f2a4" : "#6ff0ff", 4 + Math.min(5, Math.floor(player.fireLevel / 2)));
       playTone(settings.mode === "auto" ? 720 : 640, 0.06, "square", 0.035);
     }
 
@@ -1214,6 +1215,15 @@ const canvas = document.querySelector("#game");
       ctx.closePath();
       ctx.fill();
 
+      const sideFlame = ctx.createLinearGradient(0, 14, 0, 34);
+      sideFlame.addColorStop(0, "rgba(100, 242, 164, 0.8)");
+      sideFlame.addColorStop(1, "rgba(100, 242, 164, 0)");
+      ctx.fillStyle = sideFlame;
+      ctx.beginPath();
+      ctx.ellipse(-16, 24, 5, 13 + Math.sin(performance.now() / 55) * 3, 0.12, 0, Math.PI * 2);
+      ctx.ellipse(16, 24, 5, 13 + Math.cos(performance.now() / 57) * 3, -0.12, 0, Math.PI * 2);
+      ctx.fill();
+
       // 画机身。
       const body = ctx.createLinearGradient(0, -35, 0, 26);
       body.addColorStop(0, "#f7fbff");
@@ -1227,8 +1237,19 @@ const canvas = document.querySelector("#game");
       ctx.closePath();
       ctx.fill();
 
+      ctx.strokeStyle = "rgba(215, 251, 255, 0.72)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -31);
+      ctx.lineTo(0, 15);
+      ctx.stroke();
+
       // 画左右机翼。
-      ctx.fillStyle = "#41d7ff";
+      const wing = ctx.createLinearGradient(-42, 0, 42, 26);
+      wing.addColorStop(0, "#1b7ad9");
+      wing.addColorStop(0.5, "#41d7ff");
+      wing.addColorStop(1, "#1b7ad9");
+      ctx.fillStyle = wing;
       ctx.beginPath();
       ctx.moveTo(-16, 3);
       ctx.lineTo(-42, 20);
@@ -1240,18 +1261,32 @@ const canvas = document.querySelector("#game");
       ctx.closePath();
       ctx.fill();
 
+      ctx.fillStyle = "#d7fbff";
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.roundRect(-33, 16, 12, 4, 2);
+      ctx.roundRect(21, 16, 12, 4, 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
       // 画驾驶舱。
-      ctx.fillStyle = "#06111f";
+      const cockpit = ctx.createLinearGradient(0, -25, 0, 0);
+      cockpit.addColorStop(0, "#d7fbff");
+      cockpit.addColorStop(0.38, "#41d7ff");
+      cockpit.addColorStop(1, "#06111f");
+      ctx.fillStyle = cockpit;
       ctx.beginPath();
       ctx.ellipse(0, -13, 8, 12, 0, 0, Math.PI * 2);
       ctx.fill();
 
       // 画外圈护盾光环。
-      ctx.strokeStyle = "rgba(111, 240, 255, 0.42)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(0, 0, 30 + Math.sin(performance.now() / 90) * 2, 0, Math.PI * 2);
-      ctx.stroke();
+      if (player.shield > 0.08) {
+        ctx.strokeStyle = `rgba(111, 240, 255, ${0.14 + player.shield * 0.34})`;
+        ctx.lineWidth = 1.4 + player.shield * 1.6;
+        ctx.beginPath();
+        ctx.arc(0, 0, 30 + Math.sin(performance.now() / 90) * 2, 0, Math.PI * 2);
+        ctx.stroke();
+      }
 
       ctx.fillStyle = "#fff7fb";
       ctx.shadowColor = "#ff8aa6";
@@ -1373,10 +1408,31 @@ const canvas = document.querySelector("#game");
       body.addColorStop(0, isBoss ? "#ffd2e0" : enemy.type === "summoner" ? "#dec6ff" : enemy.type === "bomber" ? "#ffb08a" : enemy.type === "stealth" ? "#c9fff7" : enemy.type === "support" ? "#b9ffc8" : enemy.maxHp > 1 ? "#ffe985" : "#9fffcc");
       body.addColorStop(0.55, isBoss ? "#d94f89" : enemy.type === "summoner" ? "#7a59d8" : enemy.type === "bomber" ? "#ff5d7d" : enemy.type === "stealth" ? "#3fb6a7" : enemy.type === "support" ? "#3fc76a" : enemy.maxHp > 1 ? "#ff7d6b" : "#28c782");
       body.addColorStop(1, isBoss ? "#341023" : "#143428");
+
+      ctx.fillStyle = isBoss ? "rgba(255, 93, 125, 0.34)" : "rgba(111, 240, 255, 0.2)";
+      ctx.beginPath();
+      ctx.moveTo(-enemy.radius * 1.3, enemy.radius * 0.04);
+      ctx.lineTo(-enemy.radius * 1.92, enemy.radius * 0.56);
+      ctx.lineTo(-enemy.radius * 0.55, enemy.radius * 0.5);
+      ctx.closePath();
+      ctx.moveTo(enemy.radius * 1.3, enemy.radius * 0.04);
+      ctx.lineTo(enemy.radius * 1.92, enemy.radius * 0.56);
+      ctx.lineTo(enemy.radius * 0.55, enemy.radius * 0.5);
+      ctx.closePath();
+      ctx.fill();
+
       ctx.fillStyle = body;
       ctx.beginPath();
       ctx.ellipse(0, 0, enemy.radius * (isBoss ? 1.42 : 1.28), enemy.radius * (isBoss ? 0.84 : 0.72), 0, 0, Math.PI * 2);
       ctx.fill();
+
+      const plateColor = isBoss ? "rgba(255, 232, 240, 0.62)" : "rgba(238, 245, 255, 0.38)";
+      ctx.strokeStyle = plateColor;
+      ctx.lineWidth = isBoss ? 3 : 2;
+      ctx.beginPath();
+      ctx.moveTo(-enemy.radius * 0.9, -enemy.radius * 0.12);
+      ctx.quadraticCurveTo(0, -enemy.radius * 0.52, enemy.radius * 0.9, -enemy.radius * 0.12);
+      ctx.stroke();
 
       if (hasShield) {
         ctx.strokeStyle = "rgba(183, 148, 255, 0.78)";
@@ -1386,24 +1442,48 @@ const canvas = document.querySelector("#game");
         ctx.stroke();
       }
 
-      ctx.fillStyle = "rgba(238, 245, 255, 0.82)";
+      const canopy = ctx.createLinearGradient(0, -enemy.radius * 0.46, 0, enemy.radius * 0.12);
+      canopy.addColorStop(0, "rgba(255, 255, 255, 0.92)");
+      canopy.addColorStop(0.45, isBoss ? "rgba(255, 188, 212, 0.9)" : "rgba(111, 240, 255, 0.82)");
+      canopy.addColorStop(1, "rgba(6, 17, 31, 0.92)");
+      ctx.fillStyle = canopy;
       ctx.beginPath();
-      ctx.arc(-enemy.radius * 0.38, -enemy.radius * 0.06, enemy.radius * 0.18, 0, Math.PI * 2);
-      ctx.arc(enemy.radius * 0.38, -enemy.radius * 0.06, enemy.radius * 0.18, 0, Math.PI * 2);
+      ctx.ellipse(0, -enemy.radius * 0.1, enemy.radius * 0.46, enemy.radius * 0.26, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = "#06111f";
+      ctx.strokeStyle = "rgba(6, 17, 31, 0.74)";
+      ctx.lineWidth = Math.max(1.5, enemy.radius * 0.08);
       ctx.beginPath();
-      ctx.arc(-enemy.radius * 0.35, -enemy.radius * 0.06, enemy.radius * 0.08, 0, Math.PI * 2);
-      ctx.arc(enemy.radius * 0.35, -enemy.radius * 0.06, enemy.radius * 0.08, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = enemy.hp < enemy.maxHp ? "rgba(255, 255, 255, 0.9)" : "rgba(255, 255, 255, 0.28)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(-enemy.radius, enemy.radius * 0.42);
-      ctx.quadraticCurveTo(0, enemy.radius * 0.86, enemy.radius, enemy.radius * 0.42);
+      ctx.moveTo(-enemy.radius * 0.32, -enemy.radius * 0.1);
+      ctx.lineTo(enemy.radius * 0.32, -enemy.radius * 0.1);
+      ctx.moveTo(0, -enemy.radius * 0.32);
+      ctx.lineTo(0, enemy.radius * 0.08);
       ctx.stroke();
+
+      ctx.fillStyle = "rgba(6, 17, 31, 0.88)";
+      ctx.beginPath();
+      ctx.roundRect(-enemy.radius * 0.5, -enemy.radius * 0.02, enemy.radius * 0.18, enemy.radius * 0.1, enemy.radius * 0.04);
+      ctx.roundRect(enemy.radius * 0.32, -enemy.radius * 0.02, enemy.radius * 0.18, enemy.radius * 0.1, enemy.radius * 0.04);
+      ctx.fill();
+
+      ctx.fillStyle = isBoss ? "#ffcf5b" : enemy.type === "support" ? "#64f2a4" : "#6ff0ff";
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.shadowBlur = isBoss ? 18 : 10;
+      ctx.beginPath();
+      ctx.ellipse(0, enemy.radius * 0.14, enemy.radius * 0.22, enemy.radius * 0.12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      const thruster = ctx.createLinearGradient(0, enemy.radius * 0.34, 0, enemy.radius * 0.86);
+      thruster.addColorStop(0, isBoss ? "rgba(255, 207, 91, 0.86)" : "rgba(100, 242, 164, 0.78)");
+      thruster.addColorStop(1, "rgba(255, 93, 125, 0)");
+      ctx.fillStyle = thruster;
+      ctx.beginPath();
+      ctx.moveTo(-enemy.radius * 0.34, enemy.radius * 0.4);
+      ctx.lineTo(0, enemy.radius * (0.72 + Math.sin(performance.now() / 80 + enemy.phase) * 0.08));
+      ctx.lineTo(enemy.radius * 0.34, enemy.radius * 0.4);
+      ctx.closePath();
+      ctx.fill();
 
       if (enemy.hp < enemy.maxHp || enemy.maxShield > 0) {
         const barWidth = enemy.radius * (isBoss ? 2.5 : 1.9);
@@ -1423,11 +1503,28 @@ const canvas = document.querySelector("#game");
     // 画玩家子弹。
     function drawBullet(bullet) {
       ctx.save();
-      ctx.shadowColor = "#6ff0ff";
-      ctx.shadowBlur = 14;
-      ctx.fillStyle = "#d7fbff";
+      const core = bullet.pierce > 0 ? "#fff4bf" : bullet.power > 1 ? "#d7fbff" : "#bff8ff";
+      const glow = bullet.pierce > 0 ? "#ffcf5b" : "#6ff0ff";
+      const trail = ctx.createLinearGradient(bullet.x, bullet.y + 20, bullet.x, bullet.y - 18);
+      trail.addColorStop(0, "rgba(65, 215, 255, 0)");
+      trail.addColorStop(0.55, bullet.pierce > 0 ? "rgba(255, 207, 91, 0.38)" : "rgba(65, 215, 255, 0.34)");
+      trail.addColorStop(1, bullet.pierce > 0 ? "rgba(255, 244, 191, 0.82)" : "rgba(215, 251, 255, 0.78)");
+      ctx.fillStyle = trail;
       ctx.beginPath();
-      ctx.roundRect(bullet.x - bullet.radius, bullet.y - 14, bullet.radius * 2, 20 + Math.max(0, bullet.power - 1) * 4, bullet.radius);
+      ctx.roundRect(bullet.x - bullet.radius * 0.72, bullet.y - 10, bullet.radius * 1.44, 34 + Math.max(0, bullet.power - 1) * 4, bullet.radius);
+      ctx.fill();
+
+      ctx.shadowColor = glow;
+      ctx.shadowBlur = bullet.pierce > 0 ? 22 : 14;
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.roundRect(bullet.x - bullet.radius, bullet.y - 16, bullet.radius * 2, 18 + Math.max(0, bullet.power - 1) * 4, bullet.radius);
+      ctx.fill();
+
+      ctx.fillStyle = "#ffffff";
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.roundRect(bullet.x - Math.max(1.2, bullet.radius * 0.28), bullet.y - 13, Math.max(2.4, bullet.radius * 0.56), 8, 2);
       ctx.fill();
       ctx.restore();
     }
@@ -1435,11 +1532,29 @@ const canvas = document.querySelector("#game");
     // 画敌方子弹。
     function drawEnemyShot(shot) {
       ctx.save();
+      const len = Math.hypot(shot.vx, shot.vy) || 1;
+      const tailX = shot.x - (shot.vx / len) * 18;
+      const tailY = shot.y - (shot.vy / len) * 18;
+      const beam = ctx.createLinearGradient(tailX, tailY, shot.x, shot.y);
+      beam.addColorStop(0, "rgba(255, 93, 125, 0)");
+      beam.addColorStop(1, "rgba(255, 93, 125, 0.72)");
+      ctx.strokeStyle = beam;
+      ctx.lineWidth = Math.max(2, shot.radius * 0.65);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(shot.x, shot.y);
+      ctx.stroke();
+
       ctx.shadowColor = "#ff5d7d";
-      ctx.shadowBlur = 12;
+      ctx.shadowBlur = 14;
       ctx.fillStyle = "#ff7a98";
       ctx.beginPath();
       ctx.arc(shot.x, shot.y, shot.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#fff7fb";
+      ctx.beginPath();
+      ctx.arc(shot.x - shot.radius * 0.22, shot.y - shot.radius * 0.22, Math.max(1.6, shot.radius * 0.34), 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
