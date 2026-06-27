@@ -421,7 +421,7 @@ const canvas = document.querySelector("#game");
     }
 
     // 自动升级模式下的最高火力等级。
-    // 限时模式最多 5 级，不限时模式可以无限成长。
+    // 限时模式最多 6 级，不限时模式可以无限成长。
     function autoMaxLevel() {
       return settings.timed ? 6 : Infinity;
     }
@@ -431,6 +431,16 @@ const canvas = document.querySelector("#game");
       const base = settings.difficulty === "hard" ? 210 : settings.difficulty === "easy" ? 135 : 170;
       const curve = Math.pow(player.fireLevel + 1, 1.95) * 28;
       return Math.round(base + curve);
+    }
+
+    function weaponPressure() {
+      const levelPressure = Math.max(0, player.fireLevel - 1) * 0.045;
+      const optionPressure = options.length * 0.06;
+      return clamp(levelPressure + optionPressure, 0, 0.48);
+    }
+
+    function scaleHpByWeapon(hp, weight = 1) {
+      return Math.max(1, Math.round(hp * (1 + weaponPressure() * weight)));
     }
 
     // 怪物每 30 秒提升一级。
@@ -639,7 +649,7 @@ const canvas = document.querySelector("#game");
     function spawnMinion(x, y, type = "minion") {
       const difficulty = difficulties[settings.difficulty];
       const pressure = 0.72 + Math.min(0.58, (wave - 1) * 0.055 + (monsterLevel - 1) * 0.035);
-      const hp = 1 + Math.floor(wave / 6);
+      const hp = scaleHpByWeapon(1 + Math.floor(wave / 6), 0.55);
       const radius = 13;
       enemies.push(makeEnemy(
         type,
@@ -659,7 +669,7 @@ const canvas = document.querySelector("#game");
       const count = Math.min(8, 3 + Math.floor((wave + 1) / 3));
       const formation = Math.random() < 0.5 ? "arc" : "vee";
       const baseX = rand(width * 0.18, width * 0.82);
-      const hp = 1 + Math.floor(wave / 6);
+      const hp = scaleHpByWeapon(1 + Math.floor(wave / 6), 0.55);
       for (let i = 0; i < count; i += 1) {
         const middle = (count - 1) / 2;
         const offset = i - middle;
@@ -683,7 +693,7 @@ const canvas = document.querySelector("#game");
     function spawnBoss(bossWave) {
       const difficulty = difficulties[settings.difficulty];
       const width = canvas.clientWidth;
-      const threatScale = 1 + (bossWave - 1) * 0.2 + (monsterLevel - 1) * 0.12;
+      const threatScale = 1 + (bossWave - 1) * 0.2 + (monsterLevel - 1) * 0.12 + weaponPressure() * 0.72;
       const hpScale = settings.difficulty === "hard" ? 1.22 : settings.difficulty === "easy" ? 0.86 : 1;
       const hp = Math.round((42 + bossWave * 7 + monsterLevel * 5) * threatScale * hpScale);
       const boss = makeEnemy(
@@ -696,7 +706,7 @@ const canvas = document.querySelector("#game");
         Math.round((360 + bossWave * 70) * difficulty.scoreScale)
       );
       boss.targetY = 88;
-      boss.shield = Math.round(6 + bossWave * 1.4);
+      boss.shield = Math.round((6 + bossWave * 1.4) * (1 + weaponPressure() * 0.75));
       boss.maxShield = boss.shield;
       enemies.push(boss);
     }
@@ -712,7 +722,7 @@ const canvas = document.querySelector("#game");
         return;
       }
       // threatScale 随怪物等级上升，用来增强血量、分数等。
-      const threatScale = 1 + (wave - 1) * 0.14 + (monsterLevel - 1) * 0.1;
+      const threatScale = 1 + (wave - 1) * 0.14 + (monsterLevel - 1) * 0.1 + weaponPressure() * 0.5;
       const eliteRoll = Math.random();
       const shielderChance = clamp(0.02 + wave * 0.012 + difficulty.enemyHealth * 0.18, 0, 0.2);
       const summonerChance = wave >= 4 ? clamp(0.01 + wave * 0.008, 0, 0.16) : 0;
@@ -732,14 +742,14 @@ const canvas = document.querySelector("#game");
       const bonusHp = Math.floor((wave - 1) / 3) + Math.floor((monsterLevel - 1) / 4);
       const hardBonus = settings.difficulty === "hard" && wave > 3 ? 1 : 0;
       const hpByType = {
-        basic: 1 + Math.floor(wave / 6),
-        minion: 1,
-        tough: 5 + bonusHp + hardBonus,
-        shielder: 5 + bonusHp + hardBonus,
-        summoner: 7 + bonusHp + hardBonus,
-        bomber: 3 + Math.floor(wave / 4),
-        stealth: 3 + Math.floor(wave / 4),
-        support: 5 + bonusHp
+        basic: scaleHpByWeapon(1 + Math.floor(wave / 6), 0.55),
+        minion: scaleHpByWeapon(1, 0.45),
+        tough: scaleHpByWeapon(5 + bonusHp + hardBonus, 0.9),
+        shielder: scaleHpByWeapon(5 + bonusHp + hardBonus, 1),
+        summoner: scaleHpByWeapon(7 + bonusHp + hardBonus, 1),
+        bomber: scaleHpByWeapon(3 + Math.floor(wave / 4), 0.78),
+        stealth: scaleHpByWeapon(3 + Math.floor(wave / 4), 0.72),
+        support: scaleHpByWeapon(5 + bonusHp, 0.95)
       };
       const radiusByType = {
         basic: 18,
@@ -845,7 +855,8 @@ const canvas = document.querySelector("#game");
       spawnTimer -= dt;
       const bossAlive = enemies.some((enemy) => enemy.type === "boss");
       const pressure = Math.min(0.58, (wave - 1) * 0.045 + (monsterLevel - 1) * 0.028);
-      const spawnGap = clamp((1.18 - pressure) * difficulty.spawnScale * (bossAlive ? 1.28 : 1), 0.28, 1.22);
+      const weaponSpawnPressure = weaponPressure() * (bossAlive ? 0.34 : 0.5);
+      const spawnGap = clamp((1.18 - pressure - weaponSpawnPressure) * difficulty.spawnScale * (bossAlive ? 1.24 : 1), 0.24, 1.22);
       if (spawnTimer <= 0) {
         spawnEnemy();
         spawnTimer = spawnGap;
