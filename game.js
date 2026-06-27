@@ -14,7 +14,8 @@ const canvas = document.querySelector("#game");
     const settingsEl = document.querySelector("#settings");
     const startBtn = document.querySelector("#start");
     const muteBtn = document.querySelector("#mute");
-    const timeLimitInput = document.querySelector("#timeLimit");
+    let timeLimitInput = document.querySelector("#timeLimit");
+    const initialSettingsHtml = settingsEl.innerHTML;
 
     // Set 在这里用来保存“当前按住的按键”。
     // 数组分别保存游戏里的各种对象：玩家子弹、敌人、敌人子弹、粒子、星星、掉落道具。
@@ -46,8 +47,10 @@ const canvas = document.querySelector("#game");
     let waveNoticeTimer = 2.4;
     let waveNoticeText = "第 1 波";
     let grazeCooldown = 0;
+    let rewardChoices = [];
 
     const waveDuration = 24;
+    const bossEveryWaves = 3;
     const dragControl = {
       active: false,
       pointerId: null,
@@ -212,6 +215,7 @@ const canvas = document.querySelector("#game");
       bossSpawnedForWave = 0;
       waveNoticeTimer = 2.4;
       waveNoticeText = "第 1 波";
+      rewardChoices = [];
       spawnTimer = 0;
       timeRemaining = settings.timed ? settings.timeLimit : 0;
       elapsedTime = 0;
@@ -230,7 +234,7 @@ const canvas = document.querySelector("#game");
       player.cooldown = 0;
       player.charge = 1;
       player.fireLevel = 1;
-      player.nextUpgrade = settings.difficulty === "hard" ? 220 : settings.difficulty === "easy" ? 150 : 180;
+      player.nextUpgrade = settings.difficulty === "hard" ? 120 : settings.difficulty === "easy" ? 70 : 90;
       player.invulnerable = 1.6;
       dragControl.active = false;
       dragControl.targetX = player.x;
@@ -262,15 +266,74 @@ const canvas = document.querySelector("#game");
     // 暂停/继续游戏。
     function togglePause() {
       if (!running) return;
+      if (rewardChoices.length > 0) return;
       paused = !paused;
       titleEl.textContent = paused ? "已暂停" : "星际空袭";
       messageEl.textContent = paused ? "按 P 继续战斗。" : "方向键或 WASD 移动。可选择不限时，或输入自定义限时时间。";
       settingsEl.hidden = paused;
+      startBtn.textContent = paused ? "继续" : "开始游戏";
       overlay.classList.toggle("hidden", !paused);
       if (!paused) {
         lastTime = performance.now();
         requestAnimationFrame(loop);
       }
+    }
+
+    function bossDefeated(enemy) {
+      score += enemy.points;
+      addPickup(enemy.x, enemy.y, true);
+      makeSparks(enemy.x, enemy.y, "#ffcf5b", 64);
+      showRewardCards();
+    }
+
+    function showRewardCards() {
+      rewardChoices = [
+        { id: "fire", title: "火力强化", desc: "火力等级 +2，主炮更快成型。" },
+        { id: "shield", title: "护盾核心", desc: "回满护盾，生命上限 +1。" },
+        { id: "option", title: "僚机支援", desc: "增加一个僚机，已满则补满能量。" },
+        { id: "bomb", title: "炸弹补给", desc: "炸弹 +1，并清空敌方弹幕。" },
+        { id: "graze", title: "擦弹充能", desc: "立刻回满能量，获得短暂无敌。" }
+      ].sort(() => Math.random() - 0.5).slice(0, 3);
+      paused = true;
+      titleEl.textContent = "选择技能";
+      messageEl.textContent = "击破 BOSS，选择一张强化卡继续。";
+      settingsEl.hidden = false;
+      settingsEl.innerHTML = rewardChoices.map((choice) => `
+        <button class="reward-card" data-reward="${choice.id}">
+          <span>${choice.title}</span>
+          <small>${choice.desc}</small>
+        </button>
+      `).join("");
+      startBtn.textContent = "稍后选择";
+      overlay.classList.remove("hidden");
+    }
+
+    function applyReward(id) {
+      if (id === "fire") {
+        player.fireLevel += 2;
+        player.nextUpgrade += autoUpgradeStep();
+      } else if (id === "shield") {
+        player.maxLives = Math.min(6, player.maxLives + 1);
+        player.lives = Math.min(player.maxLives, player.lives + 1);
+        player.shield = 1;
+      } else if (id === "option") {
+        if (options.length < 2) options.push({ side: options.length === 0 ? -1 : 1, x: player.x, y: player.y });
+        else player.charge = 1;
+      } else if (id === "bomb") {
+        player.bombs = Math.min(3, player.bombs + 1);
+        enemyShots.length = 0;
+      } else if (id === "graze") {
+        player.charge = 1;
+        player.invulnerable = Math.max(player.invulnerable, 1.2);
+      }
+      rewardChoices = [];
+      settingsEl.innerHTML = initialSettingsHtml;
+      bindSettingButtons();
+      syncSettingButtons();
+      paused = false;
+      overlay.classList.add("hidden");
+      lastTime = performance.now();
+      requestAnimationFrame(loop);
     }
 
     // 更新左上角分数/时间，以及顶部中间的波次倒计时提示。
@@ -306,8 +369,9 @@ const canvas = document.querySelector("#game");
 
     // 自动升级模式下，每升一级需要增加多少分数门槛。
     function autoUpgradeStep() {
-      const base = settings.difficulty === "hard" ? 280 : settings.difficulty === "easy" ? 190 : 230;
-      return Math.round(base + player.fireLevel * 38);
+      const base = settings.difficulty === "hard" ? 92 : settings.difficulty === "easy" ? 58 : 72;
+      const curve = Math.pow(player.fireLevel + 1, 1.72) * 18;
+      return Math.round(base + curve);
     }
 
     // 怪物每 30 秒提升一级。
@@ -329,11 +393,11 @@ const canvas = document.querySelector("#game");
 
       wave = nextWave;
       waveNoticeTimer = 2.8;
-      waveNoticeText = wave % 5 === 0 ? `第 ${wave} 波 BOSS` : `第 ${wave} 波`;
+      waveNoticeText = wave % bossEveryWaves === 0 ? `第 ${wave} 波 BOSS` : `第 ${wave} 波`;
       spawnTimer = Math.min(spawnTimer, 0.12);
-      makeSparks(canvas.clientWidth / 2, 78, wave % 5 === 0 ? "#ff5d7d" : "#ffcf5b", wave % 5 === 0 ? 46 : 28);
-      playTone(wave % 5 === 0 ? 90 : 160, 0.2, "sawtooth", 0.055);
-      if (wave % 5 === 0 && bossSpawnedForWave !== wave) {
+      makeSparks(canvas.clientWidth / 2, 78, wave % bossEveryWaves === 0 ? "#ff5d7d" : "#ffcf5b", wave % bossEveryWaves === 0 ? 46 : 28);
+      playTone(wave % bossEveryWaves === 0 ? 90 : 160, 0.2, "sawtooth", 0.055);
+      if (wave % bossEveryWaves === 0 && bossSpawnedForWave !== wave) {
         spawnBoss(wave);
         bossSpawnedForWave = wave;
       }
@@ -538,9 +602,9 @@ const canvas = document.querySelector("#game");
     function spawnBoss(bossWave) {
       const difficulty = difficulties[settings.difficulty];
       const width = canvas.clientWidth;
-      const threatScale = 1 + (bossWave - 1) * 0.22 + (monsterLevel - 1) * 0.14;
+      const threatScale = 1 + (bossWave - 1) * 0.2 + (monsterLevel - 1) * 0.12;
       const hpScale = settings.difficulty === "hard" ? 1.22 : settings.difficulty === "easy" ? 0.86 : 1;
-      const hp = Math.round((34 + bossWave * 9 + monsterLevel * 6) * threatScale * hpScale);
+      const hp = Math.round((42 + bossWave * 7 + monsterLevel * 5) * threatScale * hpScale);
       const boss = makeEnemy(
         "boss",
         width / 2,
@@ -836,9 +900,13 @@ const canvas = document.querySelector("#game");
           if (enemy.hp <= 0) {
             // 敌人血量归零：加分、可能掉落道具、播放爆炸效果。
             enemies.splice(i, 1);
-            score += enemy.points;
-            if (enemy.type === "bomber") fireEnemyBurst(enemy, 8, 150);
-            addPickup(enemy.x, enemy.y);
+            if (enemy.type === "boss") {
+              bossDefeated(enemy);
+            } else {
+              score += enemy.points;
+              if (enemy.type === "bomber") fireEnemyBurst(enemy, 8, 150);
+              addPickup(enemy.x, enemy.y);
+            }
             makeSparks(enemy.x, enemy.y, enemy.maxHp > 1 ? "#ffcf5b" : "#64f2a4", enemy.maxHp > 1 ? 30 : 18);
             playTone(enemy.maxHp > 1 ? 120 : 260, 0.12, "triangle", 0.055);
           } else {
@@ -1422,29 +1490,53 @@ const canvas = document.querySelector("#game");
       });
     }
 
-    // 开始界面的设置按钮。
-    // data-option 表示修改哪个设置，data-value 表示要改成什么值。
-    for (const button of document.querySelectorAll("[data-option]")) {
-      button.addEventListener("click", () => {
-        const option = button.dataset.option;
-        settings[option] = option === "timed" ? button.dataset.value === "true" : button.dataset.value;
-        if (option === "timed" && settings.timed) readTimeLimit();
+    const pauseBtn = document.querySelector("[data-action='pause']");
+    if (pauseBtn) {
+      pauseBtn.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        togglePause();
+      });
+    }
+
+    function bindSettingButtons() {
+      timeLimitInput = document.querySelector("#timeLimit");
+      for (const button of document.querySelectorAll("[data-option]")) {
+        button.addEventListener("click", () => {
+          const option = button.dataset.option;
+          settings[option] = option === "timed" ? button.dataset.value === "true" : button.dataset.value;
+          if (option === "timed" && settings.timed) readTimeLimit();
+          syncSettingButtons();
+          titleEl.textContent = "星际空袭";
+          messageEl.textContent = `已选择：${modeText()} / ${timeText()} / ${difficulties[settings.difficulty].label}难度。怪物每 30 秒升级。`;
+        });
+      }
+
+      timeLimitInput.addEventListener("change", () => {
+        readTimeLimit();
+        settings.timed = true;
         syncSettingButtons();
         titleEl.textContent = "星际空袭";
         messageEl.textContent = `已选择：${modeText()} / ${timeText()} / ${difficulties[settings.difficulty].label}难度。怪物每 30 秒升级。`;
       });
     }
 
-    timeLimitInput.addEventListener("change", () => {
-      readTimeLimit();
-      settings.timed = true;
-      syncSettingButtons();
-      titleEl.textContent = "星际空袭";
-      messageEl.textContent = `已选择：${modeText()} / ${timeText()} / ${difficulties[settings.difficulty].label}难度。怪物每 30 秒升级。`;
-    });
+    bindSettingButtons();
 
     // 开始按钮和音效按钮。
-    startBtn.addEventListener("click", startGame);
+    startBtn.addEventListener("click", () => {
+      if (rewardChoices.length > 0) return;
+      if (running && paused) {
+        togglePause();
+      } else {
+        startGame();
+      }
+    });
+    settingsEl.addEventListener("click", (event) => {
+      const card = event.target.closest("[data-reward]");
+      if (!card) return;
+      event.preventDefault();
+      applyReward(card.dataset.reward);
+    });
     muteBtn.addEventListener("click", () => {
       muted = !muted;
       muteBtn.textContent = muted ? "音效：关" : "音效：开";
