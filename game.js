@@ -234,7 +234,7 @@ const canvas = document.querySelector("#game");
       player.cooldown = 0;
       player.charge = 1;
       player.fireLevel = 1;
-      player.nextUpgrade = settings.difficulty === "hard" ? 240 : settings.difficulty === "easy" ? 150 : 190;
+      player.nextUpgrade = settings.difficulty === "hard" ? 190 : settings.difficulty === "easy" ? 120 : 150;
       player.invulnerable = 1.6;
       dragControl.active = false;
       dragControl.targetX = player.x;
@@ -559,6 +559,7 @@ const canvas = document.querySelector("#game");
 
     function spawnMinion(x, y, type = "minion") {
       const difficulty = difficulties[settings.difficulty];
+      const pressure = 0.72 + Math.min(0.58, (wave - 1) * 0.055 + (monsterLevel - 1) * 0.035);
       const hp = 1 + Math.floor(wave / 6);
       const radius = 13;
       enemies.push(makeEnemy(
@@ -567,7 +568,7 @@ const canvas = document.querySelector("#game");
         y,
         hp,
         radius,
-        (rand(118, 172) + wave * 7) * difficulty.enemySpeed,
+        (rand(92, 138) + wave * 6) * difficulty.enemySpeed * pressure,
         Math.round(8 * difficulty.scoreScale * (1 + wave * 0.08))
       ));
     }
@@ -575,7 +576,8 @@ const canvas = document.querySelector("#game");
     function spawnSquad() {
       const width = canvas.clientWidth;
       const difficulty = difficulties[settings.difficulty];
-      const count = Math.min(8, 4 + Math.floor(wave / 2));
+      const pressure = 0.72 + Math.min(0.58, (wave - 1) * 0.055 + (monsterLevel - 1) * 0.035);
+      const count = Math.min(8, 3 + Math.floor((wave + 1) / 3));
       const formation = Math.random() < 0.5 ? "arc" : "vee";
       const baseX = rand(width * 0.18, width * 0.82);
       const hp = 1 + Math.floor(wave / 6);
@@ -590,7 +592,7 @@ const canvas = document.querySelector("#game");
           y,
           hp,
           16,
-          (rand(132, 188) + wave * 12) * difficulty.enemySpeed,
+          (rand(82, 128) + wave * 7) * difficulty.enemySpeed * pressure,
           Math.round(12 * difficulty.scoreScale * (1 + wave * 0.08))
         );
         enemy.path = formation;
@@ -624,7 +626,9 @@ const canvas = document.querySelector("#game");
     function spawnEnemy() {
       const width = canvas.clientWidth;
       const difficulty = difficulties[settings.difficulty];
-      if (Math.random() < 0.46) {
+      const pressure = 0.72 + Math.min(0.58, (wave - 1) * 0.055 + (monsterLevel - 1) * 0.035);
+      const squadChance = clamp(0.34 + wave * 0.015, 0.34, 0.52);
+      if (Math.random() < squadChance) {
         spawnSquad();
         return;
       }
@@ -668,7 +672,7 @@ const canvas = document.querySelector("#game");
         support: 23
       };
       const radius = radiusByType[type];
-      const speed = (rand(92, 142) + wave * 9 + monsterLevel * 6) * difficulty.enemySpeed * (type === "summoner" || type === "support" ? 0.76 : 1);
+      const speed = (rand(70, 112) + wave * 6 + monsterLevel * 4) * difficulty.enemySpeed * pressure * (type === "summoner" || type === "support" ? 0.76 : 1);
       const points = Math.round((type === "basic" ? 14 : type === "tough" ? 42 : type === "shielder" ? 52 : type === "bomber" ? 44 : type === "stealth" ? 50 : type === "support" ? 54 : 62) * difficulty.scoreScale * threatScale);
       enemies.push(makeEnemy(type, rand(34, width - 34), -32, hpByType[type], radius, speed, points));
     }
@@ -761,7 +765,8 @@ const canvas = document.querySelector("#game");
       // 根据当前难度、波次、怪物等级决定刷怪间隔。
       spawnTimer -= dt;
       const bossAlive = enemies.some((enemy) => enemy.type === "boss");
-      const spawnGap = clamp((0.78 - wave * 0.032 - monsterLevel * 0.015) * difficulty.spawnScale * (bossAlive ? 1.22 : 1), 0.16, 0.95);
+      const pressure = Math.min(0.58, (wave - 1) * 0.045 + (monsterLevel - 1) * 0.028);
+      const spawnGap = clamp((1.18 - pressure) * difficulty.spawnScale * (bossAlive ? 1.28 : 1), 0.28, 1.22);
       if (spawnTimer <= 0) {
         spawnEnemy();
         spawnTimer = spawnGap;

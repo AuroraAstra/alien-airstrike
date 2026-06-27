@@ -344,7 +344,7 @@
       left: 12px;
       right: 12px;
       bottom: 12px;
-      display: none;
+      display: grid;
       grid-template-columns: 1fr auto;
       gap: 12px;
       pointer-events: none;
