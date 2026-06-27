@@ -309,7 +309,8 @@
     }
 
     .pad button,
-    .fire {
+    .fire,
+    .bomb {
       width: 48px;
       height: 48px;
       padding: 0;
@@ -349,13 +350,27 @@
       font-weight: 900;
     }
 
+    .bomb {
+      align-self: end;
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      pointer-events: auto;
+      color: #fff7fb;
+      background: linear-gradient(180deg, #ff8aa6, #ff4e78);
+      border-color: rgba(255, 255, 255, 0.56);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
     @media (hover: none), (pointer: coarse) {
       .touch-controls {
         display: grid;
         left: auto;
         right: max(12px, env(safe-area-inset-right));
         bottom: max(12px, env(safe-area-inset-bottom));
-        grid-template-columns: auto;
+        grid-template-columns: auto auto;
+        align-items: end;
       }
 
       .pad {
@@ -366,6 +381,12 @@
         width: 58px;
         height: 58px;
         font-size: 13px;
+      }
+
+      .bomb {
+        width: 48px;
+        height: 48px;
+        font-size: 11px;
       }
 
       .overlay {
@@ -665,7 +686,8 @@
         left: auto;
         right: max(12px, env(safe-area-inset-right));
         bottom: max(12px, env(safe-area-inset-bottom));
-        grid-template-columns: auto;
+        grid-template-columns: auto auto;
+        align-items: end;
       }
 
       .pad {
@@ -676,6 +698,12 @@
         width: 58px;
         height: 58px;
         font-size: 13px;
+      }
+
+      .bomb {
+        width: 48px;
+        height: 48px;
+        font-size: 11px;
       }
 
       .hud {

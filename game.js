@@ -25,6 +25,7 @@ const canvas = document.querySelector("#game");
     const sparks = [];
     const stars = [];
     const pickups = [];
+    const options = [];
 
     // 这些变量是整局游戏会变化的状态。
     // running 表示游戏是否正在运行，paused 表示是否暂停。
@@ -44,6 +45,7 @@ const canvas = document.querySelector("#game");
     let bossSpawnedForWave = 0;
     let waveNoticeTimer = 2.4;
     let waveNoticeText = "第 1 波";
+    let grazeCooldown = 0;
 
     const waveDuration = 24;
     const dragControl = {
@@ -106,6 +108,8 @@ const canvas = document.querySelector("#game");
       speed: 410,
       lives: 3,
       maxLives: 3,
+      shield: 1,
+      bombs: 2,
       cooldown: 0,
       charge: 1,
       fireLevel: 1,
@@ -216,10 +220,13 @@ const canvas = document.querySelector("#game");
       enemyShots.length = 0;
       sparks.length = 0;
       pickups.length = 0;
+      options.length = 0;
       player.x = canvas.clientWidth / 2;
       player.y = canvas.clientHeight - 92;
       player.lives = difficulty.lives;
       player.maxLives = difficulty.lives;
+      player.shield = 1;
+      player.bombs = settings.difficulty === "hard" ? 1 : 2;
       player.cooldown = 0;
       player.charge = 1;
       player.fireLevel = 1;
@@ -376,6 +383,20 @@ const canvas = document.querySelector("#game");
       if (enemyShots.length > 360) enemyShots.splice(0, enemyShots.length - 360);
     }
 
+    function fireEnemyBurst(enemy, count = 8, speed = 150) {
+      for (let i = 0; i < count; i += 1) {
+        const angle = (Math.PI * 2 * i) / count + rand(-0.08, 0.08);
+        enemyShots.push({
+          x: enemy.x,
+          y: enemy.y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          radius: 5
+        });
+      }
+      if (enemyShots.length > 360) enemyShots.splice(0, enemyShots.length - 360);
+    }
+
     // 玩家开火。
     // auto=true 表示自动升级模式里自动射击；false 表示玩家按键射击。
     function shoot(auto = false) {
@@ -386,6 +407,11 @@ const canvas = document.querySelector("#game");
       if (settings.mode === "energy" && player.charge > 0.62) {
         bullets.push({ x: player.x - 16, y: player.y - 22, vx: -48, vy: -680, radius: 3, power: 1 });
         bullets.push({ x: player.x + 16, y: player.y - 22, vx: 48, vy: -680, radius: 3, power: 1 });
+      }
+      if (options.length > 0 && player.charge > 0.22) {
+        for (const option of options) {
+          bullets.push({ x: option.x, y: option.y - 12, vx: 0, vy: -620, radius: 3, power: 1 });
+        }
       }
       if (settings.mode === "auto") {
         // 自动升级模式：火力等级越高，弹丸越多、散射越宽、威力越强。
@@ -419,6 +445,28 @@ const canvas = document.querySelector("#game");
       playTone(settings.mode === "auto" ? 720 : 640, 0.06, "square", 0.035);
     }
 
+    function useBomb() {
+      if (!running || paused || player.bombs <= 0) return;
+      player.bombs -= 1;
+      player.invulnerable = Math.max(player.invulnerable, 1.8);
+      shake = 18;
+      enemyShots.length = 0;
+      for (let i = enemies.length - 1; i >= 0; i -= 1) {
+        const enemy = enemies[i];
+        const damage = enemy.type === "boss" ? 18 + wave * 2 : 999;
+        enemy.hp -= damage;
+        enemy.shield = 0;
+        makeSparks(enemy.x, enemy.y, "#ffcf5b", enemy.type === "boss" ? 36 : 22);
+        if (enemy.hp <= 0) {
+          enemies.splice(i, 1);
+          score += enemy.points;
+          addPickup(enemy.x, enemy.y, true);
+        }
+      }
+      makeSparks(player.x, player.y, "#ff8aa6", 70);
+      playTone(70, 0.34, "sawtooth", 0.09);
+    }
+
     function makeEnemy(type, x, y, hp, radius, speed, points) {
       const difficulty = difficulties[settings.difficulty];
       return {
@@ -426,26 +474,31 @@ const canvas = document.querySelector("#game");
         x,
         y,
         baseX: x,
+        targetY: type === "tough" || type === "shielder" || type === "summoner" || type === "support" ? rand(74, 148) : 0,
+        diveTimer: type === "bomber" ? rand(0.9, 1.7) : Infinity,
+        stealthTimer: type === "stealth" ? rand(0.8, 1.4) : Infinity,
+        visible: true,
         radius,
         hp,
         maxHp: hp,
-        shield: type === "shielder" ? Math.max(2, Math.floor(wave * 0.55)) : 0,
-        maxShield: type === "shielder" ? Math.max(2, Math.floor(wave * 0.55)) : 0,
+        shield: type === "shielder" || type === "support" ? Math.max(2, Math.floor(wave * 0.55)) : 0,
+        maxShield: type === "shielder" || type === "support" ? Math.max(2, Math.floor(wave * 0.55)) : 0,
         speed,
-        wobble: rand(0.7, type === "boss" ? 1.2 : 2.2),
+        wobble: rand(0.7, type === "boss" ? 1.2 : 2.6),
         phase: rand(0, Math.PI * 2),
+        path: type === "basic" || type === "minion" ? (Math.random() < 0.5 ? "sine" : "sweep") : "hover",
         shotTimer: rand(0.8, type === "boss" ? 1.7 : 2.8) / Math.sqrt(wave * difficulty.enemyFire * (1 + monsterLevel * 0.16)),
         summonTimer: type === "summoner" || type === "boss" ? rand(2.8, 4.8) : Infinity,
         points
       };
     }
 
-    function spawnMinion(x, y) {
+    function spawnMinion(x, y, type = "minion") {
       const difficulty = difficulties[settings.difficulty];
       const hp = 1 + Math.floor(wave / 6);
       const radius = 13;
       enemies.push(makeEnemy(
-        "minion",
+        type,
         clamp(x + rand(-42, 42), radius, canvas.clientWidth - radius),
         y,
         hp,
@@ -453,6 +506,33 @@ const canvas = document.querySelector("#game");
         (rand(118, 172) + wave * 7) * difficulty.enemySpeed,
         Math.round(8 * difficulty.scoreScale * (1 + wave * 0.08))
       ));
+    }
+
+    function spawnSquad() {
+      const width = canvas.clientWidth;
+      const difficulty = difficulties[settings.difficulty];
+      const count = Math.min(8, 4 + Math.floor(wave / 2));
+      const formation = Math.random() < 0.5 ? "arc" : "vee";
+      const baseX = rand(width * 0.18, width * 0.82);
+      const hp = 1 + Math.floor(wave / 6);
+      for (let i = 0; i < count; i += 1) {
+        const middle = (count - 1) / 2;
+        const offset = i - middle;
+        const x = clamp(baseX + offset * 34, 24, width - 24);
+        const y = -36 - Math.abs(offset) * (formation === "arc" ? 12 : 20);
+        const enemy = makeEnemy(
+          "basic",
+          x,
+          y,
+          hp,
+          16,
+          (rand(132, 188) + wave * 12) * difficulty.enemySpeed,
+          Math.round(12 * difficulty.scoreScale * (1 + wave * 0.08))
+        );
+        enemy.path = formation;
+        enemy.baseX = x;
+        enemies.push(enemy);
+      }
     }
 
     function spawnBoss(bossWave) {
@@ -480,35 +560,52 @@ const canvas = document.querySelector("#game");
     function spawnEnemy() {
       const width = canvas.clientWidth;
       const difficulty = difficulties[settings.difficulty];
+      if (Math.random() < 0.46) {
+        spawnSquad();
+        return;
+      }
       // threatScale 随怪物等级上升，用来增强血量、分数等。
       const threatScale = 1 + (wave - 1) * 0.14 + (monsterLevel - 1) * 0.1;
       const eliteRoll = Math.random();
       const shielderChance = clamp(0.02 + wave * 0.012 + difficulty.enemyHealth * 0.18, 0, 0.2);
       const summonerChance = wave >= 4 ? clamp(0.01 + wave * 0.008, 0, 0.16) : 0;
+      const bomberChance = wave >= 3 ? clamp(0.04 + wave * 0.006, 0, 0.15) : 0;
+      const stealthChance = wave >= 6 ? clamp(0.02 + wave * 0.004, 0, 0.1) : 0;
+      const supportChance = wave >= 7 ? clamp(0.015 + wave * 0.004, 0, 0.09) : 0;
       const toughChance = Math.min(0.24 + wave * 0.022 + monsterLevel * 0.016 + difficulty.enemyHealth, 0.82);
       let type = "basic";
-      if (eliteRoll < summonerChance) type = "summoner";
-      else if (eliteRoll < summonerChance + shielderChance) type = "shielder";
-      else if (eliteRoll < summonerChance + shielderChance + toughChance) type = "tough";
+      let cursor = 0;
+      if (eliteRoll < (cursor += supportChance)) type = "support";
+      else if (eliteRoll < (cursor += stealthChance)) type = "stealth";
+      else if (eliteRoll < (cursor += bomberChance)) type = "bomber";
+      else if (eliteRoll < (cursor += summonerChance)) type = "summoner";
+      else if (eliteRoll < (cursor += shielderChance)) type = "shielder";
+      else if (eliteRoll < (cursor += toughChance)) type = "tough";
 
       const bonusHp = Math.floor((wave - 1) / 3) + Math.floor((monsterLevel - 1) / 4);
       const hardBonus = settings.difficulty === "hard" && wave > 3 ? 1 : 0;
       const hpByType = {
-        basic: 2 + Math.floor(wave / 3) + Math.floor(monsterLevel / 5),
+        basic: 1 + Math.floor(wave / 6),
         minion: 1,
         tough: 5 + bonusHp + hardBonus,
         shielder: 5 + bonusHp + hardBonus,
-        summoner: 7 + bonusHp + hardBonus
+        summoner: 7 + bonusHp + hardBonus,
+        bomber: 3 + Math.floor(wave / 4),
+        stealth: 3 + Math.floor(wave / 4),
+        support: 5 + bonusHp
       };
       const radiusByType = {
         basic: 18,
         tough: 24,
         shielder: 25,
-        summoner: 27
+        summoner: 27,
+        bomber: 20,
+        stealth: 21,
+        support: 23
       };
       const radius = radiusByType[type];
-      const speed = (rand(112, 168) + wave * 14 + monsterLevel * 8) * difficulty.enemySpeed * (type === "summoner" ? 0.86 : 1);
-      const points = Math.round((type === "basic" ? 16 : type === "tough" ? 38 : type === "shielder" ? 48 : 56) * difficulty.scoreScale * threatScale);
+      const speed = (rand(92, 142) + wave * 9 + monsterLevel * 6) * difficulty.enemySpeed * (type === "summoner" || type === "support" ? 0.76 : 1);
+      const points = Math.round((type === "basic" ? 14 : type === "tough" ? 42 : type === "shielder" ? 52 : type === "bomber" ? 44 : type === "stealth" ? 50 : type === "support" ? 54 : 62) * difficulty.scoreScale * threatScale);
       enemies.push(makeEnemy(type, rand(34, width - 34), -32, hpByType[type], radius, speed, points));
     }
 
@@ -532,12 +629,19 @@ const canvas = document.querySelector("#game");
 
     // 敌人被击毁时，有概率掉落道具。
     // life 加生命，upgrade 升级火力，charge 回满能量。
-    function addPickup(x, y) {
-      const chance = settings.mode === "auto" ? 0.18 : 0.13;
-      if (Math.random() > chance) return;
-      const type = settings.mode === "auto"
-        ? (Math.random() < 0.72 ? "upgrade" : "life")
-        : (Math.random() < 0.68 ? "charge" : "life");
+    function addPickup(x, y, force = false) {
+      const chance = settings.mode === "auto" ? 0.2 : 0.16;
+      if (!force && Math.random() > chance) return;
+      if (force) {
+        pickups.push({ x, y, radius: 12, speed: 120, type: Math.random() < 0.5 ? "bomb" : "charge" });
+        return;
+      }
+      const roll = Math.random();
+      const type = roll < 0.1 ? "bomb"
+        : roll < 0.24 ? "option"
+        : settings.mode === "auto"
+          ? (roll < 0.78 ? "upgrade" : "life")
+          : (roll < 0.78 ? "charge" : "life");
       pickups.push({ x, y, radius: 12, speed: 120, type });
     }
 
@@ -568,7 +672,9 @@ const canvas = document.querySelector("#game");
       }
       player.cooldown = Math.max(0, player.cooldown - dt);
       player.charge = Math.min(1, player.charge + dt * 0.16);
+      player.shield = Math.min(1, player.shield + dt * 0.045);
       player.invulnerable = Math.max(0, player.invulnerable - dt);
+      grazeCooldown = Math.max(0, grazeCooldown - dt);
       elapsedTime += dt;
       updateMonsterLevel();
       updateWaveProgress(dt);
@@ -622,13 +728,20 @@ const canvas = document.querySelector("#game");
         const shot = enemyShots[i];
         shot.x += shot.vx * dt;
         shot.y += shot.vy * dt;
-        if (shot.y > height - shot.radius || shot.x < -shot.radius || shot.x > width + shot.radius) {
+        if (shot.y > height - shot.radius * 2 || shot.x < -shot.radius || shot.x > width + shot.radius) {
           enemyShots.splice(i, 1);
           continue;
         }
-        if (player.invulnerable <= 0 && circlesTouch(player, shot)) {
+        const hitbox = { x: player.x, y: player.y - 4, radius: 8 };
+        const grazeZone = { x: player.x, y: player.y - 4, radius: 25 };
+        if (player.invulnerable <= 0 && circlesTouch(hitbox, shot)) {
           enemyShots.splice(i, 1);
           hurtPlayer();
+        } else if (grazeCooldown <= 0 && circlesTouch(grazeZone, shot) && !circlesTouch(hitbox, shot)) {
+          grazeCooldown = 0.12;
+          score += 2;
+          player.charge = Math.min(1, player.charge + 0.015);
+          makeSparks(player.x, player.y - 6, "#d7fbff", 3);
         }
       }
 
@@ -639,13 +752,44 @@ const canvas = document.querySelector("#game");
         if (enemy.type === "boss") {
           if (enemy.y < enemy.targetY) enemy.y += enemy.speed * dt;
           enemy.x += Math.sin(enemy.phase) * (86 + wave * 5) * dt;
+          enemy.y = Math.min(enemy.y, height * 0.32);
+        } else if (enemy.type === "tough" || enemy.type === "shielder" || enemy.type === "summoner" || enemy.type === "support") {
+          if (enemy.y < enemy.targetY) enemy.y += enemy.speed * dt;
+          else enemy.x += Math.sin(enemy.phase) * (56 + wave * 2) * dt;
+        } else if (enemy.type === "bomber") {
+          enemy.diveTimer -= dt;
+          const angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+          const diving = enemy.diveTimer <= 0 || Math.hypot(player.x - enemy.x, player.y - enemy.y) < 180;
+          enemy.x += (diving ? Math.cos(angle) * enemy.speed * 1.9 : Math.sin(enemy.phase) * 72) * dt;
+          enemy.y += enemy.speed * (diving ? 1.7 : 1) * dt;
+        } else if (enemy.type === "stealth") {
+          enemy.stealthTimer -= dt;
+          if (enemy.stealthTimer <= 0) {
+            enemy.visible = !enemy.visible;
+            enemy.stealthTimer = enemy.visible ? rand(0.9, 1.4) : rand(0.35, 0.65);
+            if (enemy.visible) enemy.x = clamp(enemy.x + rand(-86, 86), enemy.radius, width - enemy.radius);
+          }
+          enemy.y += enemy.speed * dt;
+          enemy.x += Math.sin(enemy.phase) * (86 + wave * 3) * dt;
         } else {
           enemy.y += enemy.speed * dt;
-          enemy.x += Math.sin(enemy.phase) * (70 + wave * 4) * dt;
+          const sway = enemy.path === "vee" ? 46 : enemy.path === "arc" ? 76 : 70;
+          enemy.x = enemy.baseX + Math.sin(enemy.phase) * (sway + wave * 2);
+          enemy.y += Math.abs(Math.sin(enemy.phase * 0.5)) * 12 * dt;
         }
         enemy.x = clamp(enemy.x, enemy.radius, width - enemy.radius);
         enemy.shotTimer -= dt;
         enemy.summonTimer -= dt;
+
+        if (enemy.type === "support" && enemy.y > 10) {
+          for (const ally of enemies) {
+            if (ally === enemy || ally.type === "boss") continue;
+            if (Math.hypot(ally.x - enemy.x, ally.y - enemy.y) < 120) {
+              ally.shield = Math.max(ally.shield, 1.5 + wave * 0.12);
+              ally.maxShield = Math.max(ally.maxShield, ally.shield);
+            }
+          }
+        }
 
         if (enemy.summonTimer <= 0 && enemy.y > 18) {
           const summonCount = enemy.type === "boss" ? 3 : 2;
@@ -656,21 +800,23 @@ const canvas = document.querySelector("#game");
 
         // 只有敌人在攻击范围内，才会朝玩家开火。
         const distanceToPlayer = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-        if (enemy.shotTimer <= 0 && enemy.y > 20 && distanceToPlayer <= enemyAttackRange()) {
+        if (enemy.visible !== false && enemy.shotTimer <= 0 && enemy.y > 20 && distanceToPlayer <= enemyAttackRange()) {
           fireEnemyVolley(enemy, difficulty);
           enemy.shotTimer = rand(enemy.type === "boss" ? 0.8 : 1.1, enemy.type === "boss" ? 1.8 : 2.7) / Math.sqrt(wave * difficulty.enemyFire * (1 + monsterLevel * 0.14));
           playTone(180, 0.08, "sawtooth", 0.018);
         }
 
-        if (enemy.type !== "boss" && enemy.y > height + enemy.radius) {
+        if (enemy.type !== "boss" && enemy.y > height - enemy.radius * 0.6) {
           enemies.splice(i, 1);
           continue;
         }
 
         // 玩家和敌人相撞，玩家受伤；BOSS 不会因为碰撞消失。
-        if (player.invulnerable <= 0 && circlesTouch(player, enemy)) {
+        const playerHitbox = { x: player.x, y: player.y - 4, radius: 10 };
+        if (enemy.visible !== false && player.invulnerable <= 0 && circlesTouch(playerHitbox, enemy)) {
           if (enemy.type !== "boss") enemies.splice(i, 1);
           makeSparks(enemy.x, enemy.y, "#ff75a0", 24);
+          if (enemy.type === "bomber") fireEnemyBurst(enemy, 10, 180);
           hurtPlayer();
           if (enemy.type !== "boss") continue;
         }
@@ -679,6 +825,7 @@ const canvas = document.querySelector("#game");
         for (let j = bullets.length - 1; j >= 0; j -= 1) {
           const bullet = bullets[j];
           if (!circlesTouch(enemy, bullet)) continue;
+          if (enemy.visible === false) continue;
           bullets.splice(j, 1);
           if (enemy.shield > 0) {
             enemy.shield = Math.max(0, enemy.shield - bullet.power);
@@ -690,6 +837,7 @@ const canvas = document.querySelector("#game");
             // 敌人血量归零：加分、可能掉落道具、播放爆炸效果。
             enemies.splice(i, 1);
             score += enemy.points;
+            if (enemy.type === "bomber") fireEnemyBurst(enemy, 8, 150);
             addPickup(enemy.x, enemy.y);
             makeSparks(enemy.x, enemy.y, enemy.maxHp > 1 ? "#ffcf5b" : "#64f2a4", enemy.maxHp > 1 ? 30 : 18);
             playTone(enemy.maxHp > 1 ? 120 : 260, 0.12, "triangle", 0.055);
@@ -716,11 +864,24 @@ const canvas = document.querySelector("#game");
             player.lives = Math.min(player.maxLives, player.lives + 1);
           } else if (pickup.type === "upgrade") {
             upgradeFire(true);
+          } else if (pickup.type === "bomb") {
+            player.bombs = Math.min(3, player.bombs + 1);
+          } else if (pickup.type === "option") {
+            if (options.length < 2) options.push({ side: options.length === 0 ? -1 : 1, x: player.x, y: player.y });
+            else player.charge = 1;
           } else {
             player.charge = 1;
+            player.shield = 1;
           }
           playTone(880, 0.11, "sine", 0.055);
         }
+      }
+
+      for (let i = 0; i < options.length; i += 1) {
+        const option = options[i];
+        const side = i === 0 ? -1 : 1;
+        option.x += (player.x + side * 42 - option.x) * Math.min(1, dt * 9);
+        option.y += (player.y + 14 - option.y) * Math.min(1, dt * 9);
       }
 
       // 更新粒子效果，生命值归零后删除。
@@ -763,7 +924,12 @@ const canvas = document.querySelector("#game");
 
     // 玩家受伤：扣生命、短暂无敌、屏幕震动、播放音效。
     function hurtPlayer() {
-      player.lives -= 1;
+      if (player.shield > 0.35) {
+        player.shield = 0;
+      } else {
+        player.lives -= 1;
+        player.shield = 0;
+      }
       player.invulnerable = 1.35;
       shake = 12;
       makeSparks(player.x, player.y, "#ff5d7d", 28);
@@ -784,6 +950,9 @@ const canvas = document.querySelector("#game");
       const height = canvas.clientHeight;
       ctx.save();
       ctx.clearRect(0, 0, width, height);
+      ctx.beginPath();
+      ctx.rect(0, 0, width, height);
+      ctx.clip();
 
       // 受伤时给整个画布加一点随机偏移，制造震屏效果。
       const shakeX = shake ? rand(-shake, shake) : 0;
@@ -804,6 +973,7 @@ const canvas = document.querySelector("#game");
       for (const bullet of bullets) drawBullet(bullet);
       for (const shot of enemyShots) drawEnemyShot(shot);
       for (const enemy of enemies) drawEnemy(enemy);
+      for (const option of options) drawOption(option);
       drawPlayer();
       drawPlayerStatusBars();
       for (const spark of sparks) drawSpark(spark);
@@ -911,6 +1081,29 @@ const canvas = document.querySelector("#game");
       ctx.beginPath();
       ctx.arc(0, 0, 30 + Math.sin(performance.now() / 90) * 2, 0, Math.PI * 2);
       ctx.stroke();
+
+      ctx.fillStyle = "#fff7fb";
+      ctx.shadowColor = "#ff8aa6";
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(0, -4, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawOption(option) {
+      ctx.save();
+      ctx.translate(option.x, option.y);
+      ctx.shadowColor = "#6ff0ff";
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = "#84f5ff";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 9, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#06111f";
+      ctx.beginPath();
+      ctx.arc(0, 0, 3, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     }
 
@@ -920,9 +1113,7 @@ const canvas = document.querySelector("#game");
       const x = clamp(player.x - barWidth / 2, 8, canvas.clientWidth - barWidth - 8);
       const y = clamp(player.y - 54, 10, canvas.clientHeight - 78);
       const healthRatio = clamp(player.lives / Math.max(1, player.maxLives), 0, 1);
-      const energyRatio = settings.mode === "energy"
-        ? clamp(player.charge, 0, 1)
-        : clamp(player.fireLevel / Math.max(8, player.fireLevel + 3), 0, 1);
+      const energyRatio = clamp(Math.max(player.shield, settings.mode === "energy" ? player.charge * 0.7 : player.fireLevel / Math.max(8, player.fireLevel + 3)), 0, 1);
 
       ctx.save();
       ctx.fillStyle = "rgba(3, 8, 17, 0.58)";
@@ -942,18 +1133,25 @@ const canvas = document.querySelector("#game");
       ctx.fillRect(x, y + barHeight + 4, barWidth, barHeight);
       ctx.fillStyle = "#41d7ff";
       ctx.fillRect(x, y + barHeight + 4, barWidth * energyRatio, barHeight);
+
+      ctx.fillStyle = "#fff7fb";
+      ctx.font = "bold 9px system-ui";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(`B${player.bombs}`, x + barWidth, y - 3);
       ctx.restore();
     }
 
     // 画敌人。
     function drawEnemy(enemy) {
       ctx.save();
+      if (enemy.visible === false) ctx.globalAlpha = 0.22;
       ctx.translate(enemy.x, enemy.y);
       const body = ctx.createLinearGradient(0, -enemy.radius, 0, enemy.radius);
       const isBoss = enemy.type === "boss";
       const hasShield = enemy.shield > 0;
-      body.addColorStop(0, isBoss ? "#ffd2e0" : enemy.type === "summoner" ? "#dec6ff" : enemy.maxHp > 1 ? "#ffe985" : "#9fffcc");
-      body.addColorStop(0.55, isBoss ? "#d94f89" : enemy.type === "summoner" ? "#7a59d8" : enemy.maxHp > 1 ? "#ff7d6b" : "#28c782");
+      body.addColorStop(0, isBoss ? "#ffd2e0" : enemy.type === "summoner" ? "#dec6ff" : enemy.type === "bomber" ? "#ffb08a" : enemy.type === "stealth" ? "#c9fff7" : enemy.type === "support" ? "#b9ffc8" : enemy.maxHp > 1 ? "#ffe985" : "#9fffcc");
+      body.addColorStop(0.55, isBoss ? "#d94f89" : enemy.type === "summoner" ? "#7a59d8" : enemy.type === "bomber" ? "#ff5d7d" : enemy.type === "stealth" ? "#3fb6a7" : enemy.type === "support" ? "#3fc76a" : enemy.maxHp > 1 ? "#ff7d6b" : "#28c782");
       body.addColorStop(1, isBoss ? "#341023" : "#143428");
       ctx.fillStyle = body;
       ctx.beginPath();
@@ -1031,9 +1229,9 @@ const canvas = document.querySelector("#game");
       ctx.save();
       ctx.translate(pickup.x, pickup.y);
       ctx.rotate(performance.now() / 420);
-      ctx.shadowColor = pickup.type === "life" ? "#ff5d7d" : pickup.type === "upgrade" ? "#64f2a4" : "#41d7ff";
+      ctx.shadowColor = pickup.type === "life" || pickup.type === "bomb" ? "#ff5d7d" : pickup.type === "upgrade" || pickup.type === "option" ? "#64f2a4" : "#41d7ff";
       ctx.shadowBlur = 18;
-      ctx.fillStyle = pickup.type === "life" ? "#ff7a98" : pickup.type === "upgrade" ? "#64f2a4" : "#6ff0ff";
+      ctx.fillStyle = pickup.type === "life" || pickup.type === "bomb" ? "#ff7a98" : pickup.type === "upgrade" || pickup.type === "option" ? "#64f2a4" : "#6ff0ff";
       ctx.beginPath();
       for (let i = 0; i < 8; i += 1) {
         const angle = (Math.PI * 2 * i) / 8;
@@ -1043,10 +1241,10 @@ const canvas = document.querySelector("#game");
       ctx.closePath();
       ctx.fill();
       ctx.fillStyle = "#06111f";
-      ctx.font = pickup.type === "upgrade" ? "bold 10px system-ui" : "bold 14px system-ui";
+      ctx.font = pickup.type === "upgrade" || pickup.type === "option" ? "bold 10px system-ui" : "bold 14px system-ui";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(pickup.type === "life" ? "+" : pickup.type === "upgrade" ? "UP" : "⚡", 0, 0);
+      ctx.fillText(pickup.type === "life" ? "+" : pickup.type === "upgrade" ? "UP" : pickup.type === "bomb" ? "B" : pickup.type === "option" ? "OP" : "E", 0, 0);
       ctx.restore();
     }
 
@@ -1080,11 +1278,12 @@ const canvas = document.querySelector("#game");
     // preventDefault 是为了防止方向键/空格触发页面滚动。
     window.addEventListener("keydown", (event) => {
       const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "w", "a", "s", "d"].includes(key)) {
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "w", "a", "s", "d", "x"].includes(key)) {
         event.preventDefault();
         keys.add(key);
       }
       if (key === "p") togglePause();
+      if (key === "x") useBomb();
     });
 
     // 键盘松开：从 keys 里删除。
@@ -1213,6 +1412,14 @@ const canvas = document.querySelector("#game");
       button.addEventListener("pointerup", release);
       button.addEventListener("pointercancel", release);
       button.addEventListener("pointerleave", release);
+    }
+
+    const bombBtn = document.querySelector("[data-action='bomb']");
+    if (bombBtn) {
+      bombBtn.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        useBomb();
+      });
     }
 
     // 开始界面的设置按钮。
