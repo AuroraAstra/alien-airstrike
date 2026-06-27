@@ -234,7 +234,7 @@ const canvas = document.querySelector("#game");
       player.cooldown = 0;
       player.charge = 1;
       player.fireLevel = 1;
-      player.nextUpgrade = settings.difficulty === "hard" ? 120 : settings.difficulty === "easy" ? 70 : 90;
+      player.nextUpgrade = settings.difficulty === "hard" ? 240 : settings.difficulty === "easy" ? 150 : 190;
       player.invulnerable = 1.6;
       dragControl.active = false;
       dragControl.targetX = player.x;
@@ -369,8 +369,8 @@ const canvas = document.querySelector("#game");
 
     // 自动升级模式下，每升一级需要增加多少分数门槛。
     function autoUpgradeStep() {
-      const base = settings.difficulty === "hard" ? 92 : settings.difficulty === "easy" ? 58 : 72;
-      const curve = Math.pow(player.fireLevel + 1, 1.72) * 18;
+      const base = settings.difficulty === "hard" ? 210 : settings.difficulty === "easy" ? 135 : 170;
+      const curve = Math.pow(player.fireLevel + 1, 1.95) * 28;
       return Math.round(base + curve);
     }
 
@@ -702,9 +702,8 @@ const canvas = document.querySelector("#game");
       }
       const roll = Math.random();
       const type = roll < 0.1 ? "bomb"
-        : roll < 0.24 ? "option"
         : settings.mode === "auto"
-          ? (roll < 0.78 ? "upgrade" : "life")
+          ? (roll < 0.62 ? "upgrade" : roll < 0.78 ? "charge" : "life")
           : (roll < 0.78 ? "charge" : "life");
       pickups.push({ x, y, radius: 12, speed: 120, type });
     }
